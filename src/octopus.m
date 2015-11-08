@@ -900,6 +900,9 @@ octopus(int argc, char **argv)
 			      cfg.coredump * 60, 0);
 		ev_timer_start(&coredump_timer);
 	}
+	ev_timer madvise_timer = { .coro = 0 };
+	ev_timer_init(&madvise_timer, slab_arena_madvise, 60, 60);
+	ev_timer_start(&madvise_timer);
 
 	int one = 1;
 	if (pipe(keepalive_pipe) == -1 || ioctl(keepalive_pipe[0], FIONBIO, &one) == -1) {

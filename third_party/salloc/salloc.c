@@ -149,6 +149,7 @@ struct arena {
 	size_t size;
 	size_t used;
 	struct slab_slist_head slabs, free_slabs;
+	struct slab* cur_free;
 };
 
 static uint32_t slab_active_caches;
@@ -260,6 +261,7 @@ arena_init(struct arena *arena, size_t size)
 
 	SLIST_INIT(&arena->slabs);
 	SLIST_INIT(&arena->free_slabs);
+	arena->cur_free = NULL;
 	return true;
 }
 
@@ -409,6 +411,13 @@ slab_of(struct slab_cache *cache)
 		slab = SLIST_FIRST(&cache->arena->free_slabs);
 		assert(slab->magic == SLAB_MAGIC);
 		SLIST_REMOVE_HEAD(&cache->arena->free_slabs, free_link);
+		if (slab == cache->arena->cur_free) {
+			if (!SLIST_EMPTY(&cache->arena->free_slabs)) {
+				cache->arena->cur_free = SLIST_FIRST(&cache->arena->free_slabs);
+			} else {
+				cache->arena->cur_free = NULL;
+			}
+		}
 		format_slab(cache, slab);
 		return slab;
 	}
@@ -465,9 +474,6 @@ slab_cache_alloc(struct slab_cache *cache)
 
 	if (fully_populated(slab)) {
 		TAILQ_REMOVE(&cache->partial_populated_slabs, slab, cache_partial_link);
-#if HAVE_MADVISE
-		slab->need_madvise = true;
-#endif
 	}
 
 	slab->used += cache->item_size + sizeof(red_zone);
@@ -512,20 +518,38 @@ sfree(void *ptr)
 		TAILQ_REMOVE(&cache->partial_populated_slabs, slab, cache_partial_link);
 		TAILQ_REMOVE(&cache->slabs, slab, cache_link);
 		SLIST_INSERT_HEAD(&cache->arena->free_slabs, slab, free_link);
-
 #if HAVE_MADVISE
-		if (slab->need_madvise) {
-			slab->need_madvise = false;
-			int r;
-			r = madvise((void *)slab + page_size, SLAB_SIZE - page_size, MADV_DONTNEED);
-			(void)r;
-			assert(r == 0);
-		}
+		slab->need_madvise = true;
 #endif
 	}
 
 	ASAN_POISON_MEMORY_REGION(item, cache->item_size, 0xfd);
 	VALGRIND_FREELIKE_BLOCK(item, sizeof(red_zone));
+}
+
+void
+slab_arena_madvise()
+{
+#if HAVE_MADVISE
+	struct slab *slab;
+	for (int j=0; j<2; j++) {
+		if (arena[j].cur_free == NULL) {
+			arena[j].cur_free = SLIST_FIRST(&arena[j].free_slabs);
+			continue;
+		}
+		slab = arena[j].cur_free;
+		for(int k=10; slab && k--; slab=SLIST_NEXT(slab, free_link)) {
+			if (slab->need_madvise) {
+				int r;
+				r = madvise((void *)slab + page_size, SLAB_SIZE - page_size, MADV_DONTNEED);
+				(void)r;
+				assert(r == 0);
+				slab->need_madvise = false;
+			}
+		}
+		arena[j].cur_free = slab;
+	}
+#endif
 }
 
 void

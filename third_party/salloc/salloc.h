@@ -79,4 +79,5 @@ void slab_stat(struct tbuf *buf);
 void slab_stat2(uint64_t *bytes_used, uint64_t *items);
 struct slab_cache *slab_cache_of_ptr(const void *ptr);
 
+void slab_arena_madvise();
 #endif // _SALLOC_H_
