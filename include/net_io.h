@@ -44,6 +44,8 @@
 #endif
 
 @class Fiber;
+void* buf_alloc(size_t size, uintptr_t *obj);
+
 struct service;
 
 struct netmsg;
@@ -54,6 +56,8 @@ struct netmsg_head {
 	struct palloc_pool *pool;
 	ssize_t bytes;
 	struct iovec *last_used_iov; /* cache for iovec joining */
+	uintptr_t last_ref;
+	u8 last_type;
 };
 
 #ifndef IOV_MAX
@@ -61,6 +65,13 @@ struct netmsg_head {
 #endif
 
 
+enum reftype {
+     REF_NO = 0,
+     REF_TNT = 1,
+     REF_LUA = 2,
+     REF_OBJC = 3,
+     REF_MSGBUF = 4
+};
 #define NETMSG_IOV_SIZE 64
 struct netmsg {
 	TAILQ_ENTRY(netmsg) link; /* first sizeof(void *) bytes are trashed by salloc() */
@@ -68,6 +79,7 @@ struct netmsg {
 	struct iovec *barrier;
 
 	struct iovec iov[NETMSG_IOV_SIZE];
+	u8 type[NETMSG_IOV_SIZE];
 	uintptr_t ref[NETMSG_IOV_SIZE];
 };
 
@@ -163,7 +175,7 @@ void netmsg_getmark(struct netmsg_head *h, struct netmsg_mark *mark) LUA_DEF;
 void net_add_iov(struct netmsg_head *o, const void *buf, size_t len) LUA_DEF;
 void net_add_iov_dup(struct netmsg_head *o, const void *buf, size_t len) LUA_DEF;
 #define net_add_dup(o, buf) net_add_iov_dup(o, (buf), sizeof(*(buf)))
-void net_add_ref_iov(struct netmsg_head *o, uintptr_t ref, const void *buf, size_t len) LUA_DEF;
+void net_add_ref_iov(struct netmsg_head *o, uintptr_t ref, u8 type, const void *buf, size_t len) LUA_DEF;
 void net_add_obj_iov(struct netmsg_head *o, struct tnt_object *obj, const void *buf, size_t len) LUA_DEF;
 void netmsg_verify_ownership(struct netmsg_head *h); /* debug method */
 

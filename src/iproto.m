@@ -270,8 +270,9 @@ iproto_wakeup_workers(ev_prepare *ev)
 struct iproto_retcode *
 iproto_reply(struct netmsg_head *h, const struct iproto *request, u32 ret_code)
 {
-	struct iproto_retcode *header = palloc(h->pool, sizeof(*header));
-	net_add_iov(h, header, sizeof(*header));
+	uintptr_t obj;
+	struct iproto_retcode *header = buf_alloc(sizeof(*header), &obj);
+	net_add_ref_iov(h, obj, REF_MSGBUF, header, sizeof(*header));
 	*header = (struct iproto_retcode){ .msg_code = request->msg_code,
 					   .data_len = h->bytes,
 					   .sync = request->sync,
@@ -282,8 +283,9 @@ iproto_reply(struct netmsg_head *h, const struct iproto *request, u32 ret_code)
 struct iproto_retcode *
 iproto_reply_small(struct netmsg_head *h, const struct iproto *request, u32 ret_code)
 {
-	struct iproto_retcode *header = palloc(h->pool, sizeof(*header));
-	net_add_iov(h, header, sizeof(*header));
+	uintptr_t obj;
+	struct iproto_retcode *header = buf_alloc(sizeof(*header), &obj);
+	net_add_ref_iov(h, obj, REF_MSGBUF, header, sizeof(*header));
 	*header = (struct iproto_retcode){ .msg_code = request->msg_code,
 					   .data_len = sizeof(ret_code),
 					   .sync = request->sync,

@@ -47,7 +47,43 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-struct slab_cache conn_cache, netmsg_cache;
+struct slab_cache conn_cache, netmsg_cache, buf_cache;
+
+#define MSGBUF_CAPA 32000
+struct msgbuf {
+	int rc;
+	int bork;
+	u8 buf[MSGBUF_CAPA];
+};
+static struct msgbuf* msgbuf = NULL;
+
+void*
+buf_alloc(size_t size, uintptr_t *obj) {
+	if (msgbuf == NULL || msgbuf->bork + size > MSGBUF_CAPA) {
+		msgbuf = slab_cache_alloc(&buf_cache);
+		msgbuf->rc = 0;
+		msgbuf->bork = 0;
+	}
+	u8 *r = msgbuf->buf + msgbuf->bork;
+	msgbuf->bork += size;
+	msgbuf->rc++;
+	*obj = (uintptr_t)msgbuf;
+	return r;
+}
+
+static inline void
+buf_release(uintptr_t obj) {
+	struct msgbuf* mb = (struct msgbuf*)obj;
+	if (--mb->rc == 0) {
+		if (mb != msgbuf) {
+			slab_cache_free(&buf_cache, mb);
+		} else {
+			msgbuf->bork = 0;
+		}
+	}
+}
+
+static struct iovec dummy; /* dummy iovec not adjacent to anything else */
 
 static struct netmsg *
 netmsg_alloc(struct netmsg_head *h)
@@ -57,11 +93,14 @@ netmsg_alloc(struct netmsg_head *h)
 	/* FIXME: use slab ctor & dtor */
 	memset(n->ref, 0, NETMSG_IOV_SIZE * sizeof(n->ref[0]));
 	memset(n->iov, 0, NETMSG_IOV_SIZE * sizeof(n->iov[0]));
+	memset(n->type, 0, NETMSG_IOV_SIZE * sizeof(n->type[0]));
 	n->count = 0;
 	n->barrier = 0;
 
 	TAILQ_INSERT_HEAD(&h->q, n, link);
-	h->last_used_iov = n->iov;
+	h->last_used_iov = &dummy;
+	h->last_ref = 0;
+	h->last_type = 0;
 	return n;
 }
 
@@ -74,33 +113,53 @@ netmsg_head_init(struct netmsg_head *h, struct palloc_pool *pool)
 	netmsg_alloc(h);
 }
 
+static inline void
+ref_decref(u8 type, uintptr_t ref) {
+	switch (type) {
+	case REF_NO: break;
+	case REF_TNT:
+#ifdef OCT_OBJECT
+		object_decr_ref((struct tnt_object *)ref);
+#else
+		abort();
+#endif
+		break;
+	case REF_LUA: {
+		lua_State *L = fiber->L;
+		lua_pushlightuserdata(L, &conn_cache);
+		lua_rawget(L, LUA_REGISTRYINDEX);
+		if (unlikely(lua_isnil(L, -1))) {
+			lua_pop(L, 1);
+			lua_getglobal(L, "__ref_registry");
+			lua_pushlightuserdata(L, &conn_cache);
+			lua_pushvalue(L, -2);
+			lua_rawset(L, LUA_REGISTRYINDEX);
+		}
+		lua_rawgeti(L, -1, 0);
+		lua_rawseti(L, -2, (int)ref);
+		lua_pushinteger(L, (int)ref);
+		lua_rawseti(L, -2, 0);
+		lua_pop(L, 1);
+		break;
+        }
+	case REF_OBJC:
+		[(id)ref release];
+		break;
+	case REF_MSGBUF:
+		buf_release(ref);
+		break;
+	}
+}
+
 static void
 netmsg_unref(struct netmsg *m, int from)
 {
-	bool have_lua_refs = 0;
 	for (int i = from; i < m->count; i++) {
-		if (m->ref[i] == 0)
-			continue;
-
-		if (m->ref[i] & 1)
-			have_lua_refs = 1;
-		else {
-#ifdef OCT_OBJECT
-			object_decr_ref((struct tnt_object *)m->ref[i]);
-#else
-			abort();
-#endif
-		}
+		ref_decref(m->type[i], m->ref[i]);
 	}
 
-	if (have_lua_refs) {
-		lua_State *L = fiber->L;
-		lua_getglobal(L, "__netmsg_unref");
-		lua_pushlightuserdata(L, m);
-		lua_pushinteger(L, from);
-		lua_call(L, 2, 0);
-	}
 	memset(m->ref + from, 0, (m->count - from) * sizeof(m->ref[0]));
+	memset(m->type + from, 0, (m->count - from) * sizeof(m->type[0]));
 	memset(m->iov + from, 0, (m->count - from) * sizeof(m->iov[0]));
 }
 
@@ -121,7 +180,7 @@ static void
 netmsg_gc(struct palloc_pool *pool, struct netmsg *m)
 {
 	for (unsigned i = 0; i < m->count; i++) {
-		if (m->ref[i] != 0 || m->iov[i].iov_len == 0)
+		if (m->type[i] != 0 || m->iov[i].iov_len == 0)
 			continue;
 
 		void *ptr = palloc(pool, m->iov[i].iov_len);
@@ -197,7 +256,7 @@ net_add_iov(struct netmsg_head *h, const void *buf, size_t len)
 	struct iovec *v = h->last_used_iov;
 	h->bytes += len;
 
-	if (v->iov_base + v->iov_len == buf) {
+	if (v->iov_base + v->iov_len == buf && h->last_type == 0) {
 		v->iov_len += len;
 	} else {
 		struct netmsg *m = TAILQ_FIRST(&h->q);
@@ -205,6 +264,8 @@ net_add_iov(struct netmsg_head *h, const void *buf, size_t len)
 		v->iov_base = (char *)buf;
 		v->iov_len = len;
 		h->last_used_iov = v;
+		m->type[m->count] = h->last_type = 0;
+		h->last_ref = 0;
 
 		/* *((*m)->ref + (*m)->count) is NULL here. see netmsg_unref() */
 		if (unlikely(++(m->count) == nelem(m->iov)))
@@ -215,36 +276,47 @@ net_add_iov(struct netmsg_head *h, const void *buf, size_t len)
 void
 net_add_iov_dup(struct netmsg_head *h, const void *buf, size_t len)
 {
-	void *copy = palloc(h->pool, len);
-	memcpy(copy, buf, len);
-	net_add_iov(h, copy, len);
+	if (len < MSGBUF_CAPA) {
+		uintptr_t obj;
+		void *copy = buf_alloc(len, &obj);
+		memcpy(copy, buf, len);
+		net_add_ref_iov(h, obj, REF_MSGBUF, copy, len);
+	} else {
+		void *copy = palloc(h->pool, len);
+		memcpy(copy, buf, len);
+		net_add_iov(h, copy, len);
+	}
+}
+
+void
+net_add_ref_iov(struct netmsg_head *h, uintptr_t obj, u8 type, const void *buf, size_t len)
+{
+	struct netmsg *m = TAILQ_FIRST(&h->q);
+	struct iovec *v = h->last_used_iov;
+
+	h->bytes += len;
+	if (v->iov_base + v->iov_len == buf && h->last_ref == obj && h->last_type == type) {
+		v->iov_len += len;
+		ref_decref(type, obj);
+	} else {
+		v = m->iov + m->count;
+		v->iov_base = (char *)buf;
+		v->iov_len = len;
+		h->last_used_iov = v;
+		m->ref[m->count] = h->last_ref = obj;
+		m->type[m->count] = h->last_type = type;
+		if (unlikely(++(m->count) == nelem(m->iov)))
+			netmsg_alloc(h);
+	}
 }
 
 #ifdef OCT_OBJECT
-static struct iovec dummy; /* dummy iovec not adjacent to anything else */
-
-void
-net_add_ref_iov(struct netmsg_head *h, uintptr_t obj, const void *buf, size_t len)
-{
-	struct netmsg *m = TAILQ_FIRST(&h->q);
-	struct iovec *v = m->iov + m->count;
-	v->iov_base = (char *)buf;
-	v->iov_len = len;
-	h->last_used_iov = &dummy;
-
-	h->bytes += len;
-	m->ref[m->count] = obj;
-
-	if (unlikely(++(m->count) == nelem(m->iov)))
-		netmsg_alloc(h);
-}
-
 void
 net_add_obj_iov(struct netmsg_head *o, struct tnt_object *obj, const void *buf, size_t len)
 {
 	assert(((uintptr_t)obj & 1) == 0);
 	object_incr_ref(obj);
-	net_add_ref_iov(o, (uintptr_t)obj, buf, len);
+	net_add_ref_iov(o, (uintptr_t)obj, REF_TNT, buf, len);
 }
 #endif
 
@@ -255,7 +327,7 @@ netmsg_verify_ownership(struct netmsg_head *h)
 
 	TAILQ_FOREACH(m, &h->q, link)
 		for (int i = 0; i < m->count; i++)
-			if (m->ref[i] != 0)
+			if (m->type[i] != 0)
 				assert(!palloc_owner(h->pool, m->iov[i].iov_base));
 			else
 				assert(palloc_owner(h->pool, m->iov[i].iov_base));
@@ -654,15 +726,17 @@ conn_flusher(va_list ap __attribute__((unused)))
 			continue;
 		}
 
-		if (c->out_messages.bytes == 0)
+		if (c->out_messages.bytes == 0) {
 			ev_io_stop(&c->out);
+		}
 
 		/* c->processing_link.tqe_prev == NULL implies
 		   that we'r reading (possibly) an oversize request */
 		if ((tbuf_len(c->rbuf) < cfg.input_low_watermark || c->processing_link.tqe_prev == NULL) &&
 		    c->out_messages.bytes < cfg.output_low_watermark &&
-		    c->state != CLOSED)
+		    c->state != CLOSED) {
 			ev_io_start(&c->in);
+		}
 	}
 }
 
@@ -1275,6 +1349,7 @@ init_slab_cache(void)
 {
 	slab_cache_init(&conn_cache, sizeof(struct conn), SLAB_GROW, "net_io/conn");
 	slab_cache_init(&netmsg_cache, sizeof(struct netmsg), SLAB_GROW, "net_io/netmsg");
+	slab_cache_init(&buf_cache, sizeof(struct msgbuf), SLAB_GROW, "net_io/msgbuf");
 }
 
 

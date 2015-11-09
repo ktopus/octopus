@@ -22,7 +22,7 @@ local iproto_retcode0_t = ffi.typeof('struct iproto_retcode_0')
 local ref -- forward decl
 
 local netmsg_op = {}
-function netmsg_op:add_iov_ref(obj, len, v) C.net_add_ref_iov(self, v or ref(obj), obj, len) end
+function netmsg_op:add_iov_ref(obj, len, v, t) C.net_add_ref_iov(self, v or ref(obj), v and (t or C.REF_TNT) or C.REF_LUA, obj, len) end
 function netmsg_op:add_iov_string(str)
     if #str < 512 then
         C.net_add_iov_dup(self.out_messages, str, #str)
@@ -50,12 +50,12 @@ end
 local conn_op = {}
 function conn_op:bytes() return self.out_messages.bytes end
 function conn_op:add_iov_dup(obj, len) C.net_add_iov_dup(self.out_messages, obj, len) end
-function conn_op:add_iov_ref(obj, len, v) C.net_add_ref_iov(self.out_messages, v or ref(obj), obj, len) end
+function conn_op:add_iov_ref(obj, len, v, t) C.net_add_ref_iov(self.out_messages, v or ref(obj), v and (t or C.REF_TNT) or C.REF_LUA, obj, len) end
 function conn_op:add_iov_string(str)
    if #str < 512 then
       C.net_add_iov_dup(self.out_messages, str, #str)
    else
-      C.net_add_ref_iov(self.out_messages, ref(str), str, #str)
+      C.net_add_ref_iov(self.out_messages, ref(str), C.REF_LUA, str, #str)
    end
 end
 function conn_op:add_iov_iproto_header(request)
@@ -97,6 +97,7 @@ end
 
 -- gc ref's
 local ref_registry = {[0]=0}
+G.__ref_registry = ref_registry
 
 ref = function(obj)
    local ref = ref_registry[0]
@@ -106,16 +107,15 @@ ref = function(obj)
       ref = #ref_registry + 1
    end
    ref_registry[ref] = obj
-   return ref * 2 + 1 -- ref to lua objects have lower bit set
+   return ref -- ref to lua objects have lower bit set
 end
 
 G.ref = ref
 function G.__netmsg_unref(m, from)
    local m = netmsg_t(m)
    for i = from, m.count do
-      local ref = tonumber(m.ref[i])
-      if bit.band(ref, 1) == 1 then
-	 ref = bit.rshift(ref, 1)
+      if m.type[i] == C.REF_LUA then
+         local ref = tonumber(m.ref[i])
 	 ref_registry[ref] = ref_registry[0]
 	 ref_registry[0] = ref
       end
