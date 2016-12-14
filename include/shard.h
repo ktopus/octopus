@@ -78,7 +78,7 @@
 
 @end
 
-enum shard_type { SHARD_TYPE_POR = 0, SHARD_TYPE_PART = 2 } ;
+enum shard_type { SHARD_TYPE_POR, SHARD_TYPE_RAFT, SHARD_TYPE_PART } ;
 
 struct shard_route {
 	Shard<Shard> *shard;

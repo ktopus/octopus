@@ -33,6 +33,8 @@
 #import <tbuf.h>
 #import <net_io.h>
 #import <assoc.h>
+#import <iproto.h>
+#import <raft.h>
 #import <shard.h>
 #import <cfg/defs.h>
 #import <iproto.h>
@@ -273,7 +275,8 @@ validate_sop(struct netmsg_head *wbuf, const struct iproto *req, void *data, int
 			}
 	}
 
-	if (sop->type != SHARD_TYPE_POR &&
+	if (sop->type != SHARD_TYPE_RAFT &&
+	    sop->type != SHARD_TYPE_POR &&
 	    sop->type != SHARD_TYPE_PART)
 	{
 		sop_err("sop: invalid shard type %i", sop->type);
@@ -320,6 +323,8 @@ init
 shard_alloc:(char)type
 {
 	switch (type) {
+	case SHARD_TYPE_RAFT:
+		return [Raft alloc];
 	case SHARD_TYPE_POR:
 	case SHARD_TYPE_PART:
 		return [POR alloc];
@@ -387,6 +392,15 @@ shard_alter_type:(Shard<Shard> **)shard sop:(struct shard_op *)sop
 	*shard = new_shard;
 	[*shard alter:sop];
 	old_shard->executor = nil;
+
+	/* FIXME: в [shard free] есть проверка на то, что shard_rt[self->id].shard == self
+	   если она не совпадает, [free] не обновляет роутинг */
+	const char *master = sop->peer[0];
+	if (strcmp(master, cfg.hostname) == 0)
+		master = NULL;
+	update_rt(new_shard->id, new_shard, master);
+	shard_log("alter_type", new_shard->id);
+
 	[old_shard release];
 }
 
@@ -421,7 +435,7 @@ shard_op_alter_peer:(Shard<Shard> *)shard sop:(struct shard_op *)sop
 - (void)
 shard_op_alter_type:(Shard<Shard> *)shard type:(char)type
 {
-	assert(type == 0 || type == 2);
+	assert(type == 0 || type == 1 || type == 2);
 	struct shard_op *sop = [shard shard_op];
 	sop->type = type;
 	if ([shard submit:sop len:sizeof(*sop) tag:shard_alter] != 1)
@@ -491,13 +505,21 @@ recover_row:(struct row_v12 *)r
 		case shard_alter: {
 			if (cfg.hostname == NULL)
 				panic("cfg.hostname is missing");
+
 			struct shard_op *sop = (struct shard_op *)r->data;
 			if (our_shard(sop) && shard) {
 				struct shard_op *old = [shard shard_op];
 
+				[shard recover_row:r]; /* обновим SCN и run_crc
+							  т.к. на мастере shard_alter_op делает изменения после
+							  записи, то он видит уже новые SCN и run_crc */
 				if (sop->type != old->type)
 					[self shard_alter_type:&shard sop:sop];
+			} else {
+				[shard recover_row:r];
+				shard = nil;
 			}
+			return;
 		}
 		default:
 			break;
@@ -676,6 +698,7 @@ enable_local_writes
 
 	for (int i = 0; i < MAX_SHARD; i++) {
 		Shard *shard = [self shard:i];
+
 		if (shard && [shard our_shard])
 			[shard enable_local_writes];
 		else
@@ -865,6 +888,11 @@ iproto_shard_cb(struct netmsg_head *wbuf, struct iproto *req)
 			for (i = 1; i < nelem(sop->peer); i++)
 				strcpy(sop->peer[i], read_bytes(&data, 16));
 			break;
+		case SHARD_TYPE_RAFT:
+			strcpy(sop->peer[0], cfg.hostname);
+			for (i = 1; i < 3; i++)
+				strcpy(sop->peer[i], read_bytes(&data, 16));
+			break;
 		case SHARD_TYPE_PART:
 			strcpy(sop->peer[0], read_bytes(&data, 16));
 			strcpy(sop->peer[1], cfg.hostname);
@@ -905,17 +933,21 @@ iproto_shard_cb(struct netmsg_head *wbuf, struct iproto *req)
 		char type = read_u8(&data);
 		switch (type) {
 		case SHARD_TYPE_POR:
+		case SHARD_TYPE_RAFT:
 		case SHARD_TYPE_PART:
 			break;
 		default:
-			iproto_raise(ERR_CODE_ILLEGAL_PARAMS, "unsuported type");
+			iproto_raise(ERR_CODE_ILLEGAL_PARAMS, "unsupported shard type");
 		}
 
-		if (sop->type == SHARD_TYPE_POR && type == SHARD_TYPE_PART) {
+		if (sop->type == SHARD_TYPE_POR && type == SHARD_TYPE_RAFT) {
+			if (peer_idx(sop, (char[16]){0}) != 3)
+				iproto_raise(ERR_CODE_ILLEGAL_PARAMS, "bad peer count");
+		} else if (sop->type == SHARD_TYPE_POR && type == SHARD_TYPE_PART) {
 			if (peer_idx(sop, (char[16]){0}) != 2)
 				iproto_raise(ERR_CODE_ILLEGAL_PARAMS, "bad peer count");
 		} else
-			iproto_raise(ERR_CODE_ILLEGAL_PARAMS, "unsuported type change");
+			iproto_raise(ERR_CODE_ILLEGAL_PARAMS, "unsupported shard type change");
 		[recovery shard_op_alter_type:shard type:type];
 		iproto_reply_small(wbuf, req, ERR_CODE_OK);
 		return;
@@ -1085,6 +1117,7 @@ recovery_iproto(void)
 		fiber_create("udpate_rt_notify", update_rt_notify);
 		service_register_iproto(recovery_service, MSG_SHARD, iproto_shard_cb, IPROTO_LOCAL|IPROTO_WLOCK);
 		service_register_iproto(recovery_service, MSG_SHARD_RT, iproto_shard_rt_cb, IPROTO_LOCAL);
+		raft_service(recovery_service);
 	}
 }
 
@@ -1101,6 +1134,8 @@ recovery_iproto_ignore()
 		return;
 	if (cfg.peer && *cfg.peer && cfg.hostname && cfg_peer_by_name(cfg.hostname)) {
 		service_register_iproto(recovery_service, MSG_SHARD, iproto_ignore, IPROTO_LOCAL|IPROTO_NONBLOCK);
+		service_register_iproto(recovery_service, RAFT_REQUEST_VOTE, iproto_ignore, IPROTO_LOCAL|IPROTO_NONBLOCK);
+		service_register_iproto(recovery_service, RAFT_APPEND_ENTRIES, iproto_ignore, IPROTO_LOCAL|IPROTO_NONBLOCK);
 	} else {
 		say_info("usharding disabled (cfg.peer of cfg.hostname is bad or missing)");
 	}
