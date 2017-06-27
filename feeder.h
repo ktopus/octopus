@@ -35,6 +35,9 @@ typedef struct row_v12 *(*filter_callback)(struct row_v12 *r, const char *arg, i
 	i64 min_scn, min_lsn;
 	int shard_id;
 	XLogReader *reader;
+
+        /* flag is set to 1 when initial full_load to replica is done and keepalive fiber is started */
+        bool keepalive_fiber_enabled;
 }
 + (void) register_filter: (const char*)name call: (filter_callback)filter;
 @end

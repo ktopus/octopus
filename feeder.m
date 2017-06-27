@@ -75,6 +75,7 @@ static Feeder *feeder;
 	[super init];
 	fd = fd_;
 	shard_id = -1;
+	keepalive_fiber_enabled = false;
 	reader = [[XLogReader alloc] init_recovery:(id)self];
 	return self;
 }
@@ -213,6 +214,20 @@ send_row:(struct row_v12 *)row
 - (void)
 recover_row:(struct row_v12 *)row
 {
+	if (keepalive_fiber_enabled == false && cfg.wal_feeder_keepalive_timeout > 0.0) {
+		static double prev_time = 0;
+		if (prev_time == 0) {
+			prev_time = ev_time();
+		} else {
+			double cur_time = ev_time();
+			if (cur_time - prev_time > cfg.wal_feeder_keepalive_timeout / 3.0) {
+				struct row_v12* sysnop = dummy_row(0, 0, nop|TAG_SYS);
+				[self send_row:sysnop];
+				prev_time = cur_time;
+			}
+		}
+	}
+
 	if ((row->scn != 0 && min_scn && row->scn < min_scn) ||
 	    (row->lsn != 0 && min_lsn && row->lsn < min_lsn))
 		return;
@@ -325,6 +340,12 @@ follow
 {
 	[self wal_final_row];
 	[reader recover_follow:cfg.wal_dir_rescan_delay];
+}
+
+- (void)
+set_keepalive_fiber_enabled
+{
+	keepalive_fiber_enabled = true;
 }
 
 static i64
@@ -457,6 +478,7 @@ recover_feed_slave(int sock, struct iproto *req)
 	if (!cfg.wal_feeder_debug_no_fork)
 		ev_timer_start(&tm);
 
+	[feeder set_keepalive_fiber_enabled];
 	ev_run(0);
 }
 
