@@ -1,4 +1,4 @@
-XCFLAGS += -DOCT_CHILDREN
+XCFLAGS += -DOCT_CHILDREN -Wno-unused-const-variable
 
 obj += src/admin.o
 obj += $(obj-log-io)
