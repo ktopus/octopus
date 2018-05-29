@@ -42,6 +42,8 @@ static u64 cas;
 
 struct mc_stats mc_stats;
 
+struct netmsg_pool_ctx ctx;
+
 static struct tnt_object *
 mc_alloc(const char *key, u32 exptime, u32 flags, u32 value_len, const char *value)
 {
@@ -428,7 +430,7 @@ void
 print_stats(struct netmsg_head *wbuf)
 {
 	u64 bytes_used, items;
-	struct tbuf *out = tbuf_alloc(wbuf->pool);
+	struct tbuf *out = tbuf_alloc(wbuf->ctx->pool);
 	slab_total_stat(&bytes_used, &items);
 
 	tbuf_printf(out, "STAT pid %"PRIu32"\r\n", (u32)getpid());
@@ -454,6 +456,7 @@ print_stats(struct netmsg_head *wbuf)
 	tbuf_printf(out, "END\r\n");
 
 	net_add_iov(wbuf, out->ptr, tbuf_len(out));
+        netmsg_pool_ctx_gc(wbuf->ctx);
 }
 
 void
@@ -485,9 +488,8 @@ memcached_handler(va_list ap)
 
 	struct tbuf rbuf = TBUF(NULL, 0, fiber->pool);
 	struct netmsg_head wbuf;
-	netmsg_head_init(&wbuf, fiber->pool);
+	netmsg_head_init(&wbuf, &ctx);
 	palloc_register_gc_root(fiber->pool, &rbuf, tbuf_gc);
-	palloc_register_gc_root(fiber->pool, &wbuf, netmsg_head_gc);
 
 	@try {
 		for (;;) {
@@ -533,7 +535,6 @@ memcached_handler(va_list ap)
 	}
 	@finally {
 		palloc_unregister_gc_root(fiber->pool, &rbuf);
-		palloc_unregister_gc_root(fiber->pool, &wbuf);
 		close(fd);
 		mc_stats.curr_connections--;
 	}
@@ -554,6 +555,8 @@ init_second_stage(va_list ap)
 	Memcached *memc = [[recovery shard:0] executor];
 
 	assert(memc);
+
+        netmsg_pool_ctx_init(&ctx, "stats_pool", 1024 * 1024);
 
 	if (fiber_create("memcached/acceptor", tcp_server, cfg.primary_addr,
 			 memcached_accept, NULL, memc) == NULL)
