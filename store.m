@@ -370,9 +370,8 @@ delete(Memcached *memc, char **keys, int n)
 }
 
 static void
-memcached_expire(va_list ap)
+memcached_expire(va_list ap __attribute__((unused)))
 {
-	Recovery *recovery = va_arg(ap, Recovery *);
 	Shard<Shard> *shard;
 	Memcached *memc;
 	CStringHash *mc_index;
