@@ -213,6 +213,7 @@ AC_COMPILE_IFELSE(
    AC_DEFINE([HAVE__BUILTIN_EXPECT], [1], [Define to 1 if the C compiler supports __builtin_expect])])
 AC_MSG_RESULT($ac_cv__builtin_expect)
 
+AC_CC_FLAG_CHECK([-Wno-error=implicit-fallthrough], [WCFLAGS="-Wno-error=implicit-fallthrough $WCFLAGS"])
 AC_CC_FLAG_CHECK([-Werror], [WCFLAGS="-Werror $WCFLAGS"])
 AC_CC_FLAG_CHECK([-Wno-sign-compare], [WCFLAGS="-Wno-sign-compare $WCFLAGS"])
 AC_CC_FLAG_CHECK([-Wextra], [WCFLAGS="-Wextra $WCFLAGS"])
