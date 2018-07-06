@@ -32,25 +32,25 @@ static inline unsigned int MurmurHash2 ( const void * key, int len, unsigned int
 	{
 		unsigned int k = *(unsigned int *)data;
 
-		k *= m; 
-		k ^= k >> r; 
-		k *= m; 
-		
-		h *= m; 
+		k *= m;
+		k ^= k >> r;
+		k *= m;
+
+		h *= m;
 		h ^= k;
 
 		data += 4;
 		len -= 4;
 	}
-	
+
 	// Handle the last few bytes of the input array
 
 	switch(len)
 	{
-	case 3: h ^= data[2] << 16;
-	case 2: h ^= data[1] << 8;
+	case 3: h ^= data[2] << 16; __attribute__ ((fallthrough));
+	case 2: h ^= data[1] << 8; __attribute__ ((fallthrough));
 	case 1: h ^= data[0];
-	        h *= m;
+			h *= m;
 	};
 
 	// Do a few final mixes of the hash to ensure the last few
@@ -61,4 +61,4 @@ static inline unsigned int MurmurHash2 ( const void * key, int len, unsigned int
 	h ^= h >> 15;
 
 	return h;
-} 
+}

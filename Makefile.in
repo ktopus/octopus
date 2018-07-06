@@ -115,10 +115,15 @@ $(filter-out $(no-extra-warns),$(obj)): XCFLAGS += $(WCFLAGS)
 	$(Q)$(CC) $(XCPPFLAGS) $(XCFLAGS) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 ifeq (1,$(HAVE_RAGEL))
-%.m: %.rl
+%.rl.m: %.rl
 	@mkdir -p $(dir $@)
 	$(E) "RAGEL	$@"
 	$(Q)$(RAGEL) -G2 $< -o $@
+
+%.o: %.rl.m
+	@mkdir -p $(dir $@)
+	$(E) "CC	$@"
+	$(Q)$(CC) $(XCPPFLAGS) $(XCFLAGS) $(CPPFLAGS) $(CFLAGS) -Wno-error=implicit-fallthrough -Wno-protocol -fobjc-exceptions -c $< -o $@
 
 %.dot: %.rl
 	@mkdir -p $(dir $@)
