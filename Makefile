@@ -15,8 +15,8 @@ obj += mod/memcached/proto.o
 mod/memcached/store.o: mod/memcached/memcached_version.h
 
 ifeq (1,$(HAVE_RAGEL))
-dist-clean += mod/memcached/proto.m
-dist += mod/memcached/proto.m
+dist-clean += mod/memcached/proto.rl.m
+dist += mod/memcached/proto.rl.m
 endif
 
 cfg_tmpl += cfg/log_io.cfg_tmpl
