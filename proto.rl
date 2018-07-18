@@ -257,7 +257,7 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 		cas       = "cas"i spc key spc flags spc exptime spc bytes spc value noreply spc? eol @read @done @{ cas (_memc, &params, _wbuf); };
 		gets      = "gets"i spc keys spc? eol @done @{ get (_memc, &params, _wbuf, true); };
 		get       = "get"i spc keys spc? eol @done @{ get (_memc, &params, _wbuf, false); };
-		delete    = "delete"i spc key (spc exptime)? noreply spc? eol @done @{ eraseKey (_memc, &params, _wbuf); };
+		del       = "delete"i spc key (spc exptime)? noreply spc? eol @done @{ eraseKey (_memc, &params, _wbuf); };
 		incr      = "incr"i spc key spc value noreply spc? eol @done @{ inc (_memc, &params, _wbuf,  1); };
 		decr      = "decr"i spc key spc value noreply spc? eol @done @{ inc (_memc, &params, _wbuf, -1); };
 		stats     = "stats"i eol @done @{ printStats (_memc, &params, _wbuf); };
@@ -272,7 +272,7 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 				prepend |
 				get |
 				gets |
-				delete |
+				del |
 				incr |
 				decr |
 				stats |
