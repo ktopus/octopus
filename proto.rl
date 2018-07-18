@@ -264,18 +264,18 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 		flush_all = "flush_all"i (spc delay)? noreply spc? eol @done @{ flushAll (_memc, &params, _wbuf); };
 		quit      = "quit"i eol @done @{ return 0; };
 
-		main := set |
-				cas |
-				add |
-				replace |
-				append |
-				prepend |
-				get |
-				gets |
-				del |
-				incr |
-				decr |
-				stats |
+		main := set       |
+				add       |
+				replace   |
+				append    |
+				prepend   |
+				cas       |
+				gets      |
+				get       |
+				del       |
+				incr      |
+				decr      |
+				stats     |
 				flush_all |
 				quit;
 	}%%
