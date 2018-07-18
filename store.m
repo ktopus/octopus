@@ -834,7 +834,7 @@ apply:(struct tbuf*)_op tag:(u16)_tag
 			while (tbuf_len (_op) > 0)
 			{
 				const char* key = (const char*)_op->ptr;
-				say_debug ("%s, DELETE %s", __PRETTY_FUNCTION__, key);
+				say_debug ("%s, ERASE %s", __PRETTY_FUNCTION__, key);
 
 				onlyErase (self, key);
 				tbuf_ltrim (_op, strlen (key) + 1);
