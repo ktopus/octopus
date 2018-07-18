@@ -29,9 +29,9 @@
 #include <util.h>
 #include <index.h>
 
-#import <net_io.h>
-#import <log_io.h>
-#import <fiber.h>
+#include <net_io.h>
+#include <log_io.h>
+#include <fiber.h>
 
 /**
  * @brief Параметры команды

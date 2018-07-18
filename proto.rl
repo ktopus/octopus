@@ -23,16 +23,16 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-#import <util.h>
-#import <index.h>
-#import <tbuf.h>
-#import <net_io.h>
-#import <say.h>
-#import <fiber.h>
+#include <util.h>
+#include <index.h>
+#include <tbuf.h>
+#include <net_io.h>
+#include <say.h>
+#include <fiber.h>
 
 #include <string.h>
 
-#import "store.h"
+#include "store.h"
 
 /**
  * @brief Квотирование символов '\r', '\n' и непечатных символов

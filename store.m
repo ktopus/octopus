@@ -27,18 +27,18 @@
 #include <sysexits.h>
 #include <salloc.h>
 
-#import <iproto.h>
-#import <util.h>
-#import <fiber.h>
-#import <log_io.h>
-#import <index.h>
-#import <say.h>
-#import <pickle.h>
+#include <iproto.h>
+#include <util.h>
+#include <fiber.h>
+#include <log_io.h>
+#include <index.h>
+#include <say.h>
+#include <pickle.h>
 
 #include <octopus.h>
 
-#import "memcached_version.h"
-#import "store.h"
+#include "memcached_version.h"
+#include "store.h"
 
 enum tag
 {
