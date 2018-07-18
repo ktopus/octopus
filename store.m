@@ -42,14 +42,48 @@
 
 enum tag
 {
-	STORE = user_tag,
-	DELETE
+	ADD_OR_REPLACE = user_tag,
+	ERASE
 };
 
 /**
- * @brief Глобальная структура для хранения статистики
+ * @brief Код объекта, заворачиваемого в структуру tnt_object
  */
-struct mc_stats g_mc_stats = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+enum object_type
+{
+	MC_OBJ = 1
+};
+
+/**
+ * @brief Ключ/значение для хранения в memcached с доп. параметрами
+ */
+struct mc_obj
+{
+	u32 exptime;
+	u32 flags;
+	u64 cas;
+	u16 key_len; /* including \0 */
+	u16 suffix_len;
+	u32 value_len;
+	char data[0]; /* key + '\0' + suffix + '\r''\n' +  data + '\n' */
+} __attribute__((packed));
+
+/**
+ * @brief Структура и переменная для хранения статистики
+ */
+static struct mc_stats
+{
+	u64 total_items;
+	u32 curr_connections;
+	u32 total_connections;
+	u64 cmd_get;
+	u64 cmd_set;
+	u64 get_hits;
+	u64 get_misses;
+	u64 evictions;
+	u64 bytes_read;
+	u64 bytes_written;
+} g_mc_stats = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 /**
  * @brief Счётчик объектов
@@ -65,6 +99,56 @@ static struct netmsg_pool_ctx g_ctx;
  * @brief Признак использования Garbage Collector при управлении памятью
  */
 #define USE_GC 1
+
+static inline struct mc_obj*
+mc_obj (struct tnt_object* _obj)
+{
+	if (_obj->type != MC_OBJ)
+		abort ();
+
+	return (struct mc_obj*)_obj->data;
+}
+
+static inline int
+mc_len (const struct mc_obj* _m)
+{
+	return sizeof (*_m) + _m->key_len + _m->suffix_len + _m->value_len;
+}
+
+static inline const char*
+mc_key (const struct mc_obj* _m)
+{
+	return _m->data;
+}
+
+static inline const char*
+mc_suffix (const struct mc_obj* _m)
+{
+	return _m->data + _m->key_len;
+}
+
+static inline const char*
+mc_value (const struct mc_obj* _m)
+{
+	return _m->data + _m->key_len + _m->suffix_len;
+}
+
+static inline bool
+mc_expired (struct tnt_object* _o)
+{
+	if (cfg.memcached_no_expire)
+		return false;
+
+	struct mc_obj* m = mc_obj (_o);
+
+	return (m->exptime == 0) ? false : m->exptime < ev_now ();
+}
+
+static inline bool
+mc_missing (struct tnt_object* _o)
+{
+	return (_o == NULL) || object_ghost (_o) || mc_expired (_o);
+}
 
 /**
  * @brief Упаковка параметров во вновь созданную структуру tnt_object{mc_obj}
@@ -99,12 +183,74 @@ mc_alloc (const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _va
 }
 
 /**
+ * @brief Проверка, является ли заданная строка беззнаковым целым числом
+ */
+static bool
+is_numeric (const char* _field, u32 _flen)
+{
+	for (int i = 0; i < _flen; ++i)
+	{
+		if ((_field[i] < '0') || ('9' < _field[i]))
+			return false;
+	}
+
+	return true;
+}
+
+/**
+ * @brief Получить указатель на первый ключ в списке
+ *
+ * Каждый ключ завершается символом '\0', после возврата указатель @a _k указывает
+ * на память за символом '\0' возвращённого ключа. Данная функция модифицирует как
+ * параметр @a _k, так и память, на которую он указывает
+ */
+static char*
+next_key (char** _k)
+{
+	char* r = *_k;
+	char* p;
+	char* s;
+
+	if (!r)
+		return NULL;
+
+	//
+	// Ищем первый пробельный символ
+	//
+	for (p = r; (*p != ' ') && (*p != '\r') && (*p != '\n'); ++p)
+		;
+
+	//
+	// Начало анализируемой строки
+	//
+	s = p;
+
+	//
+	// Проматываем все пробелы
+	//
+	while (*p == ' ')
+		p++;
+
+	//
+	// Если это не конец строки
+	//
+	if ((*p != '\r') && (*p != '\n'))
+		*_k = p;
+	else
+		*_k = NULL;
+
+	*s = 0;
+
+	return r;
+}
+
+/**
  * @brief Удаление данных из кэша без записи в журнал и без блокировок
  *
  * Используется при восстановлении данных из журнала и/или снапшота
  */
 static void
-onlyDelete (Memcached* _memc, const char* _key)
+onlyErase (Memcached* _memc, const char* _key)
 {
 	struct tnt_object* o = [_memc->mc_index find:_key];
 	if (o)
@@ -120,7 +266,7 @@ onlyDelete (Memcached* _memc, const char* _key)
  * Используется при восстановлении данных из журнала и/или снапшота
  */
 static void
-onlyStore (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _value, u64 _cas)
+onlyAddOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _value, u64 _cas)
 {
 	struct tnt_object* o = mc_alloc (_key, _exptime, _flags, _vlen, _value, _cas);
 	object_incr_ref (o);
@@ -135,7 +281,7 @@ onlyStore (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vl
 	//
 	// Удаляем из кэша объект с таким же ключём
 	//
-	onlyDelete (_memc, _key);
+	onlyErase (_memc, _key);
 
 	//
 	// Добавляем объект в кэш
@@ -147,7 +293,22 @@ onlyStore (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vl
  * @brief Восстановление данных из журнала и/или снапшота
  */
 static void
-onlyStoreCompat (Memcached* _memc, struct tbuf* _op)
+onlyEraseCompat (Memcached* _memc, struct tbuf* _op)
+{
+	int klen = read_varint32 (_op);
+
+	char key[klen + 1];
+	memcpy (key, _op->ptr, klen);
+	key[klen] = 0;
+
+	onlyErase (_memc, key);
+}
+
+/**
+ * @brief Восстановление данных из журнала и/или снапшота
+ */
+static void
+onlyAddOrReplaceCompat (Memcached* _memc, struct tbuf* _op)
 {
 	int   klen = read_varint32 (_op);
 	char* key  = read_bytes (_op, klen);
@@ -165,22 +326,244 @@ onlyStoreCompat (Memcached* _memc, struct tbuf* _op)
 	int   vlen  = read_varint32 (_op);
 	char* value = read_bytes (_op, vlen);
 
-	onlyStore (_memc, key, exptime, flags, vlen, value, cas);
+	onlyAddOrReplace (_memc, key, exptime, flags, vlen, value, cas);
 }
 
 /**
- * @brief Восстановление данных из журнала и/или снапшота
+ * @brief Добавить или обновить объект в кэше с записью информации в журнал
+ */
+static int
+addOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _value)
+{
+	if ([_memc->shard is_replica])
+		return 0;
+
+	//
+	// Создаём объект для сохранения в кэше
+	//
+	struct tnt_object* o = mc_alloc (_key, _exptime, _flags, _vlen, _value, 0);
+	object_incr_ref (o);
+
+	@try
+	{
+		//
+		// Ищём в кэше объект с тем же ключём и если нашли, то блокируем
+		// объект в кэше, чтобы он не мог быть удалён или изменён в
+		// параллельных соединениях
+		//
+		struct tnt_object* oo = NULL;
+		if ((oo = [_memc->mc_index find_obj:o]))
+			object_lock (oo);
+
+		//
+		// Пишем данные о добавляемом объекте в лог
+		//
+		{
+			struct mc_obj* m = mc_obj (o);
+			if ([_memc->shard submit:m len:mc_len (m) tag:ADD_OR_REPLACE|TAG_WAL] != 1)
+			{
+				//
+				// Если объект в кэше был заблокирован, то разблокируем его
+				//
+				if (oo)
+					object_unlock (oo);
+
+				//
+				// Выбрасываем исключение о невозможности записи в журнал
+				//
+				// FIXME: код ошибки выбран произвольно, так как подходящего
+				//        не объявлено
+				//
+				iproto_raise (ERR_CODE_MEMORY_ISSUE, "can't write WAL row");
+			}
+		}
+
+		//
+		// Добавляем объект в кэш (блокировать его нет необходимости, так как
+		// далее по коду он не используется и другие соединения могут его
+		// модифицировать как угодно)
+		//
+		[_memc->mc_index replace:o];
+
+		//
+		// Если в кэше был объект с тем же ключом, то разблокируем его и
+		// удаляем (в принципе разблокировка не нужна, так как объект уже
+		// в кэше не находится и он в любом случае будет удалён. Но всё
+		// равно для чистоты кода разблокируем)
+		//
+		if (oo)
+		{
+			object_unlock (oo);
+			object_decr_ref (oo);
+		}
+
+		//
+		// Возвращаем количество добавленных/обновлённых объектов
+		//
+		return 1;
+	}
+	@catch (Error* e)
+	{
+		say_warn ("%s, got exception: %s", __PRETTY_FUNCTION__, e->reason);
+		[e release];
+	}
+	@catch (id e)
+	{}
+
+	//
+	// В случае ошибки удаляем созданный объект и возвращаем нулевое
+	// количество добавленных/изменённых объектов
+	//
+	object_decr_ref (o);
+	return 0;
+}
+
+/**
+ * @brief Удалить объект из кэша с записью информации в журнал
+ */
+static int
+erase (Memcached* _memc, const char* _keys[], int _n)
+{
+	//
+	// Из реплики ничего не удаляем
+	//
+	if ([_memc->shard is_replica])
+		return 0;
+
+	//
+	// Распределяем массив указателей для всех потенциально удаляемых объектов.
+	// Массив распределяем в памяти, которая будет удалена после обработки
+	// соединения
+	//
+	struct tnt_object** objs = palloc (fiber->pool, sizeof (struct tnt_object*)*_n);
+
+	//
+	// Собираем в массив все объекты для удаления
+	//
+	int k = 0;
+	for (int i = 0; i < _n; ++i)
+	{
+		//
+		// Если объект с заданным ключом найден в кэше
+		//
+		if ((objs[k] = [_memc->mc_index find:*(_keys++)]))
+		{
+			@try
+			{
+				//
+				// Блокируем объект, чтобы его не могли изменить в параллельных
+				// соединениях. Здесь может быть выброшено исключение, которое
+				// обойдёт приращение счётчика объектов для удаления и соответственно
+				// данный объект не будет удалён
+				//
+				object_lock (objs[k]);
+
+				//
+				// Если объект успешно заблокирован, то увеличиваем счётчик
+				// объектов для удаления
+				//
+				++k;
+			}
+			@catch (Error* e)
+			{
+				say_warn ("%s, got exception: %s", __PRETTY_FUNCTION__, e->reason);
+				[e release];
+			}
+			@catch (id e)
+			{}
+		}
+	}
+
+	//
+	// Если есть объекты для удаления
+	//
+	if (k > 0)
+	{
+		//
+		// Пишем в буфер все объекты для записи информации в журнал. Буфер
+		// распределяем в памяти, которая будет удалена после обработки
+		// соединения
+		//
+		struct tbuf* b = tbuf_alloc (fiber->pool);
+		for (int i = 0; i < k; ++i)
+		{
+			struct mc_obj* m = mc_obj (objs[i]);
+
+			tbuf_append (b, m->data, m->key_len);
+		}
+
+		//
+		// Если данные об удаляемых объектов удалось записать в журнал
+		//
+		if ([_memc->shard submit:b->ptr len:tbuf_len (b) tag:ERASE|TAG_WAL] == 1)
+		{
+			for (int i = 0; i < k; ++i)
+			{
+				//
+				// Удаляем объекты из кэша
+				//
+				[_memc->mc_index remove:objs[i]];
+
+				//
+				// ... и из памяти
+				//
+				object_unlock (objs[i]);
+				object_decr_ref (objs[i]);
+			}
+
+			//
+			// Число реально удалённых объектов
+			//
+			return k;
+		}
+	}
+
+	return 0;
+}
+
+/**
+ * @brief Добавить или обновить объект в кэше с проверкой размера данных и выводом сообщения
  */
 static void
-onlyDeleteCompat (Memcached* _memc, struct tbuf* _op)
+addOrReplaceKey (Memcached* _memc, const char* _key, struct mc_params* _params, struct netmsg_head* _wbuf)
 {
-	int klen = read_varint32 (_op);
+	++g_mc_stats.cmd_set;
 
-	char key[klen + 1];
-	memcpy (key, _op->ptr, klen);
-	key[klen] = 0;
+	if (_params->bytes > (1 << 20))
+	{
+		ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR object too large for cache\r\n");
+	}
+	else
+	{
+		if (addOrReplace (_memc, _key, _params->exptime, _params->flags, _params->bytes, _params->data) > 0)
+		{
+			g_mc_stats.total_items++;
 
-	onlyDelete (_memc, key);
+			ADD_IOV_LITERAL (_params->noreply, _wbuf, "STORED\r\n");
+		}
+		else
+		{
+			ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR\r\n");
+		}
+	}
+}
+
+static void
+flush_all (va_list _ap)
+{
+	Memcached* memc = va_arg (_ap, Memcached*);
+
+	i32 delay = va_arg (_ap, u32);
+	if (delay > ev_now ())
+		fiber_sleep (delay - ev_now ());
+
+	u32 slots = [memc->mc_index slots];
+	for (u32 i = 0; i < slots; ++i)
+	{
+		struct tnt_object* obj = [memc->mc_index get:i];
+		if (obj != NULL)
+			mc_obj (obj)->exptime = 1;
+	}
 }
 
 static void
@@ -219,7 +602,7 @@ memcached_expire (va_list _ap __attribute__((unused)))
 			if ((o == NULL) || object_ghost (o))
 				continue;
 
-			if (!expired (o))
+			if (!mc_expired (o))
 				continue;
 
 			struct mc_obj* m = mc_obj (o);
@@ -229,7 +612,7 @@ memcached_expire (va_list _ap __attribute__((unused)))
 			++k;
 		}
 
-		delete (memc, (const char**)keys, k);
+		erase (memc, (const char**)keys, k);
 		say_debug ("%s, expired %i keys", __PRETTY_FUNCTION__, k);
 
 		fiber_gc ();
@@ -243,16 +626,16 @@ mc_print_row (struct tbuf* _out, u16 _tag, struct tbuf* _op)
 {
 	switch(_tag & TAG_MASK)
 	{
-		case STORE:
+		case ADD_OR_REPLACE:
 		{
 			struct mc_obj* m = _op->ptr;
 			const char*    k = m->data;
-			tbuf_printf (_out, "STORE %.*s %.*s", m->key_len, k, m->value_len, mc_value (m));
+			tbuf_printf (_out, "ADD_OR_REPLACE %.*s %.*s", m->key_len, k, m->value_len, mc_value (m));
 			break;
 		}
 
-		case DELETE:
-			tbuf_printf (_out, "DELETE");
+		case ERASE:
+			tbuf_printf (_out, "ERASE");
 			while (tbuf_len (_op) > 0)
 			{
 				const char* k = _op->ptr;
@@ -433,27 +816,27 @@ apply:(struct tbuf*)_op tag:(u16)_tag
 {
 	/*
 	 * row format is dead simple:
-	 *     STORE -> op is mc_obj itself.
-	 *     DELETE -> op is key array
+	 *     ADD_OR_REPLACE -> op is mc_obj itself.
+	 *     ERASE          -> op is key array
 	 */
 	switch (_tag & TAG_MASK)
 	{
-		case STORE:
+		case ADD_OR_REPLACE:
 		{
 			struct mc_obj* m = (struct mc_obj*)_op->ptr;
-			say_debug ("%s, STORE %s", __PRETTY_FUNCTION__, mc_key (m));
+			say_debug ("%s, ADD_OR_REPLACE %s", __PRETTY_FUNCTION__, mc_key (m));
 
-			onlyStore (self, mc_key (m), m->exptime, m->flags, m->value_len, mc_value (m), m->cas);
+			onlyAddOrReplace (self, mc_key (m), m->exptime, m->flags, m->value_len, mc_value (m), m->cas);
 			break;
 		}
 
-		case DELETE:
+		case ERASE:
 			while (tbuf_len (_op) > 0)
 			{
 				const char* key = (const char*)_op->ptr;
 				say_debug ("%s, DELETE %s", __PRETTY_FUNCTION__, key);
 
-				onlyDelete (self, key);
+				onlyErase (self, key);
 				tbuf_ltrim (_op, strlen (key) + 1);
 			}
 			break;
@@ -470,22 +853,22 @@ apply:(struct tbuf*)_op tag:(u16)_tag
 			{
 				case 13:
 				{
-					say_debug ("%s, STORE(compat)", __PRETTY_FUNCTION__);
+					say_debug ("%s, ADD_OR_REPLACE(compat)", __PRETTY_FUNCTION__);
 
 					read_u32 (_op); /* flags */
 					read_u32 (_op); /* cardinality */
 
-					onlyStoreCompat (self, _op);
+					onlyAddOrReplaceCompat (self, _op);
 					break;
 				}
 
 				case 20:
 				{
-					say_debug ("%s, DELETE(compat)", __PRETTY_FUNCTION__);
+					say_debug ("%s, ERASE(compat)", __PRETTY_FUNCTION__);
 
 					read_u32 (_op); /* key cardinality */
 
-					onlyDeleteCompat (self, _op);
+					onlyEraseCompat (self, _op);
 					break;
 				}
 
@@ -505,7 +888,7 @@ apply:(struct tbuf*)_op tag:(u16)_tag
 			read_u32 (_op); /* cardinality */
 			read_u32 (_op); /* data_size */
 
-			onlyStoreCompat (self, _op);
+			onlyAddOrReplaceCompat (self, _op);
 			break;
 
 		default:
@@ -545,7 +928,7 @@ snapshot_write_rows: (XLog*)_log
 	while ((o = [mc_index iterator_next]))
 	{
 		struct mc_obj* m = mc_obj (o);
-		if ([_log append_row:m len:mc_len (m) shard:nil tag:STORE|TAG_SNAP] == NULL)
+		if ([_log append_row:m len:mc_len (m) shard:nil tag:ADD_OR_REPLACE|TAG_SNAP] == NULL)
 			return -1;
 
 		if ((++i)%100000 == 0)
@@ -575,37 +958,13 @@ print:(const struct row_v12*)_row into:(struct tbuf*)_buf
 }
 @end
 
-struct mc_obj*
-mc_obj (struct tnt_object* _obj)
+u64
+natoq (const char* _start, const char* _end)
 {
-	if (unlikely (_obj->type != MC_OBJ))
-		abort ();
-
-	return (struct mc_obj*)_obj->data;
-}
-
-int
-mc_len (const struct mc_obj* _m)
-{
-	return sizeof (*_m) + _m->key_len + _m->suffix_len + _m->value_len;
-}
-
-const char*
-mc_key (const struct mc_obj* _m)
-{
-	return _m->data;
-}
-
-const char*
-mc_suffix (const struct mc_obj* _m)
-{
-	return _m->data + _m->key_len;
-}
-
-const char*
-mc_value (const struct mc_obj* _m)
-{
-	return _m->data + _m->key_len + _m->suffix_len;
+	u64 num = 0;
+	while (_start < _end)
+		num = num*10 + (*_start++ - '0');
+	return num;
 }
 
 void
@@ -623,212 +982,235 @@ init (struct mc_params* _params)
 	_params->data     = NULL;
 }
 
-bool
-expired (struct tnt_object* _o)
+void
+protoError (struct mc_params* _params, struct netmsg_head* _wbuf)
 {
-	if (cfg.memcached_no_expire)
-		return false;
-
-	struct mc_obj* m = mc_obj (_o);
-
-	return (m->exptime == 0) ? false : m->exptime < ev_now ();
-}
-
-bool
-missing (struct tnt_object* _o)
-{
-	return (_o == NULL) || object_ghost (_o) || expired (_o);
-}
-
-int
-addOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _value)
-{
-	if ([_memc->shard is_replica])
-		return 0;
-
-	//
-	// Создаём объект для сохранения в кэше
-	//
-	struct tnt_object* o = mc_alloc (_key, _exptime, _flags, _vlen, _value, 0);
-	object_incr_ref (o);
-
-	@try
-	{
-		//
-		// Ищём в кэше объект с тем же ключём и если нашли, то блокируем
-		// объект в кэше, чтобы он не мог быть удалён или изменён в
-		// параллельных соединениях
-		//
-		struct tnt_object* oo = NULL;
-		if ((oo = [_memc->mc_index find_obj:o]))
-			object_lock (oo);
-
-		//
-		// Пишем данные о добавляемом объекте в лог
-		//
-		{
-			struct mc_obj* m = mc_obj (o);
-			if ([_memc->shard submit:m len:mc_len (m) tag:STORE|TAG_WAL] != 1)
-			{
-				//
-				// Если объект в кэше был заблокирован, то разблокируем его
-				//
-				if (oo)
-					object_unlock (oo);
-
-				//
-				// Выбрасываем исключение о невозможности записи в журнал
-				//
-				// FIXME: код ошибки выбран произвольно, так как подходящего
-				//        не объявлено
-				//
-				iproto_raise (ERR_CODE_MEMORY_ISSUE, "can't write WAL row");
-			}
-		}
-
-		//
-		// Добавляем объект в кэш (блокировать его нет необходимости, так как
-		// далее по коду он не используется и другие соединения могут его
-		// модифицировать как угодно)
-		//
-		[_memc->mc_index replace:o];
-
-		//
-		// Если в кэше был объект с тем же ключом, то разблокируем его и
-		// удаляем (в принципе разблокировка не нужна, так как объект уже
-		// в кэше не находится и он в любом случае будет удалён. Но всё
-		// равно для чистоты кода разблокируем)
-		//
-		if (oo)
-		{
-			object_unlock (oo);
-			object_decr_ref (oo);
-		}
-
-		//
-		// Возвращаем количество добавленных/обновлённых объектов
-		//
-		return 1;
-	}
-	@catch (Error* e)
-	{
-		say_warn ("%s, got exception: %s", __PRETTY_FUNCTION__, e->reason);
-		[e release];
-	}
-	@catch (id e)
-	{}
-
-	//
-	// В случае ошибки удаляем созданный объект и возвращаем нулевое
-	// количество добавленных/изменённых объектов
-	//
-	object_decr_ref (o);
-	return 0;
-}
-
-int
-delete (Memcached* _memc, const char* _keys[], int _n)
-{
-	//
-	// Из реплики ничего не удаляем
-	//
-	if ([_memc->shard is_replica])
-		return 0;
-
-	//
-	// Распределяем массив указателей для всех потенциально удаляемых объектов.
-	// Массив распределяем в памяти, которая будет удалена после обработки
-	// соединения
-	//
-	struct tnt_object** objs = palloc (fiber->pool, sizeof (struct tnt_object*)*_n);
-
-	//
-	// Собираем в массив все объекты для удаления
-	//
-	int k = 0;
-	for (int i = 0; i < _n; ++i)
-	{
-		//
-		// Если объект с заданным ключом найден в кэше
-		//
-		if ((objs[k] = [_memc->mc_index find:*(_keys++)]))
-		{
-			@try
-			{
-				//
-				// Блокируем объект, чтобы его не могли изменить в параллельных
-				// соединениях. Здесь может быть выброшено исключение, которое
-				// обойдёт приращение счётчика объектов для удаления и соответственно
-				// данный объект не будет удалён
-				//
-				object_lock (objs[k]);
-
-				//
-				// Если объект успешно заблокирован, то увеличиваем счётчик
-				// объектов для удаления
-				//
-				++k;
-			}
-			@catch (Error* e)
-			{
-				say_warn ("%s, got exception: %s", __PRETTY_FUNCTION__, e->reason);
-				[e release];
-			}
-			@catch (id e)
-			{}
-		}
-	}
-
-	//
-	// Если есть объекты для удаления
-	//
-	if (k > 0)
-	{
-		//
-		// Пишем в буфер все объекты для записи информации в журнал. Буфер
-		// распределяем в памяти, которая будет удалена после обработки
-		// соединения
-		//
-		struct tbuf* b = tbuf_alloc (fiber->pool);
-		for (int i = 0; i < k; ++i)
-		{
-			struct mc_obj* m = mc_obj (objs[i]);
-
-			tbuf_append (b, m->data, m->key_len);
-		}
-
-		//
-		// Если данные об удаляемых объектов удалось записать в журнал
-		//
-		if ([_memc->shard submit:b->ptr len:tbuf_len (b) tag:DELETE|TAG_WAL] == 1)
-		{
-			for (int i = 0; i < k; ++i)
-			{
-				//
-				// Удаляем объекты из кэша
-				//
-				[_memc->mc_index remove:objs[i]];
-
-				//
-				// ... и из памяти
-				//
-				object_unlock (objs[i]);
-				object_decr_ref (objs[i]);
-			}
-
-			//
-			// Число реально удалённых объектов
-			//
-			return k;
-		}
-	}
-
-	return 0;
+	say_warn ("%s, memcached proto error", __PRETTY_FUNCTION__);
+	ADD_IOV_LITERAL (_params->noreply, _wbuf, "ERROR\r\n");
+	g_mc_stats.bytes_written += 7;
 }
 
 void
-print_stats (struct netmsg_head* _wbuf)
+statsAddRead (u64 _bytes)
 {
+	g_mc_stats.bytes_read += _bytes;
+}
+
+void
+set (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
+{
+	const char* key = next_key (&_params->keys);
+
+	addOrReplaceKey (_memc, key, _params, _wbuf);
+}
+
+void
+add (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
+{
+	const char* key = next_key (&_params->keys);
+
+	struct tnt_object* o = [_memc->mc_index find:key];
+	if (!mc_missing (o))
+		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_STORED\r\n");
+	else
+		addOrReplaceKey (_memc, key, _params, _wbuf);
+}
+
+void
+replace (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
+{
+	const char* key = next_key (&_params->keys);
+
+	struct tnt_object* o = [_memc->mc_index find:key];
+	if (mc_missing (o))
+		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_STORED\r\n");
+	else
+		addOrReplaceKey (_memc, key, _params, _wbuf);
+}
+
+void
+cas (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
+{
+	const char* key = next_key (&_params->keys);
+
+	struct tnt_object* o = [_memc->mc_index find:key];
+	if (mc_missing (o))
+		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_FOUND\r\n");
+	else if (mc_obj (o)->cas != _params->value)
+		ADD_IOV_LITERAL (_params->noreply, _wbuf, "EXISTS\r\n");
+	else
+		addOrReplaceKey (_memc, key, _params, _wbuf);
+}
+
+void
+append (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, bool _back)
+{
+	char* key = next_key (&_params->keys);
+
+	struct tnt_object* o = [_memc->mc_index find:key];
+	if (mc_missing (o))
+	{
+		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_STORED\r\n");
+	}
+	else
+	{
+		struct mc_obj* m = mc_obj (o);
+		struct tbuf*   b = tbuf_alloc (fiber->pool);
+
+		if (_back)
+		{
+			tbuf_append (b, mc_value (m), m->value_len);
+			tbuf_append (b, _params->data, _params->bytes);
+		}
+		else
+		{
+			tbuf_append (b, _params->data, _params->bytes);
+			tbuf_append (b, mc_value (m), m->value_len);
+		}
+
+		_params->bytes += m->value_len;
+		_params->data   = (char*)b->ptr;
+
+		addOrReplaceKey (_memc, key, _params, _wbuf);
+	}
+}
+
+void
+inc (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, int _sign)
+{
+	const char* key = next_key (&_params->keys);
+
+	struct tnt_object* o = [_memc->mc_index find:key];
+	if (mc_missing (o))
+	{
+		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_FOUND\r\n");
+	}
+	else
+	{
+		struct mc_obj* m = mc_obj (o);
+
+		if (is_numeric (mc_value (m), m->value_len))
+		{
+			++g_mc_stats.cmd_set;
+
+			u64 value = natoq (mc_value (m), mc_value (m) + m->value_len);
+
+			if (_sign > 0)
+			{
+				value += _params->value;
+			}
+			else
+			{
+				if (_params->value > value)
+					value = 0;
+				else
+					value -= _params->value;
+			}
+
+			struct tbuf* b = tbuf_alloc (fiber->pool);
+			tbuf_printf (b, "%"PRIu64, value);
+
+			if (addOrReplace (_memc, key, m->exptime, m->flags, tbuf_len(b), b->ptr))
+			{
+				++g_mc_stats.total_items;
+
+				if (!_params->noreply)
+				{
+					net_add_iov (_wbuf, b->ptr, tbuf_len (b));
+					ADD_IOV_LITERAL (_params->noreply, _wbuf, "\r\n");
+				}
+			}
+			else
+			{
+				ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR\r\n");
+			}
+		}
+		else
+		{
+			ADD_IOV_LITERAL (_params->noreply, _wbuf, "CLIENT_ERROR cannot increment or decrement non-numeric value\r\n");
+		}
+	}
+}
+
+void
+eraseKey (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
+{
+	const char* key = next_key (&_params->keys);
+
+	struct tnt_object* o = [_memc->mc_index find:key];
+	if (mc_missing(o))
+	{
+		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_FOUND\r\n");
+	}
+	else
+	{
+		if (erase (_memc, &key, 1) > 0)
+			ADD_IOV_LITERAL (_params->noreply, _wbuf, "DELETED\r\n");
+		else
+			ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR\r\n");
+	}
+}
+
+void
+get (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, bool _show_cas)
+{
+	++g_mc_stats.cmd_get;
+
+	const char* key;
+	while ((key = next_key (&_params->keys)))
+	{
+		struct tnt_object* o = [_memc->mc_index find:key];
+
+		if (mc_missing (o))
+		{
+			++g_mc_stats.get_misses;
+			continue;
+		}
+
+		++g_mc_stats.get_hits;
+
+		struct mc_obj* m = mc_obj (o);
+		const char* suffix = mc_suffix (m);
+		const char* value  = mc_value (m);
+
+		if (_show_cas)
+		{
+			struct tbuf* b = tbuf_alloc (fiber->pool);
+			tbuf_printf (b, "VALUE %s %"PRIu32" %"PRIu32" %"PRIu64"\r\n", key, m->flags, m->value_len, m->cas);
+			net_add_iov (_wbuf, b->ptr, tbuf_len (b));
+			g_mc_stats.bytes_written += tbuf_len (b);
+		}
+		else
+		{
+			ADD_IOV_LITERAL (_params->noreply, _wbuf, "VALUE ");
+			net_add_iov (_wbuf, key, m->key_len - 1);
+			net_add_iov (_wbuf, suffix, m->suffix_len);
+		}
+
+		net_add_obj_iov (_wbuf, o, value, m->value_len);
+		ADD_IOV_LITERAL (_params->noreply, _wbuf, "\r\n");
+
+		g_mc_stats.bytes_written += m->value_len + 2;
+	}
+
+	ADD_IOV_LITERAL (_params->noreply, _wbuf, "END\r\n");
+
+	g_mc_stats.bytes_written += 5;
+}
+
+void
+flushAll (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
+{
+	fiber_create ("flush_all", flush_all, _memc, _params->delay);
+	ADD_IOV_LITERAL (_params->noreply, _wbuf, "OK\r\n");
+}
+
+void
+printStats (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
+{
+	(void)_memc;
+	(void)_params;
+
 	u64 bytes_used, items;
 	struct tbuf* out = tbuf_alloc (_wbuf->ctx->pool);
 
@@ -862,24 +1244,6 @@ print_stats (struct netmsg_head* _wbuf)
 
 	net_add_iov (_wbuf, out->ptr, tbuf_len (out));
 	netmsg_pool_ctx_gc (_wbuf->ctx);
-}
-
-void
-flush_all (va_list _ap)
-{
-	Memcached* memc = va_arg (_ap, Memcached*);
-
-	i32 delay = va_arg (_ap, u32);
-	if (delay > ev_now ())
-		fiber_sleep (delay - ev_now ());
-
-	u32 slots = [memc->mc_index slots];
-	for (u32 i = 0; i < slots; ++i)
-	{
-		struct tnt_object* obj = [memc->mc_index get:i];
-		if (obj != NULL)
-			mc_obj (obj)->exptime = 1;
-	}
 }
 
 static struct tnt_module memcached =

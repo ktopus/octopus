@@ -23,43 +23,15 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-#ifndef OCTOPUS_MEMCACHED_H
-#define OCTOPUS_MEMCACHED_H
+#ifndef __OCTOPUS_MEMCACHED_H
+#define __OCTOPUS_MEMCACHED_H
 
 #include <util.h>
 #include <index.h>
 
+#import <net_io.h>
 #import <log_io.h>
 #import <fiber.h>
-
-/**
- * @brief In Memory хранилище ключ/объект с возможностью восстановления состояния после перезапуска
- */
-@interface Memcached : Object<Executor>
-	{
-		struct Fiber* expire_fiber;
-
-	@public
-		Shard<Shard>* shard;
-		CStringHash*  mc_index;
-	}
-@end
-
-enum object_type
-{
-	MC_OBJ = 1
-};
-
-struct mc_obj
-{
-	u32 exptime;
-	u32 flags;
-	u64 cas;
-	u16 key_len; /* including \0 */
-	u16 suffix_len;
-	u32 value_len;
-	char data[0]; /* key + '\0' + suffix + '\r''\n' +  data + '\n' */
-} __attribute__((packed));
 
 /**
  * @brief Параметры команды
@@ -80,46 +52,104 @@ struct mc_params
 	char* data;
 };
 
-struct mc_stats
-{
-	u64 total_items;
-	u32 curr_connections;
-	u32 total_connections;
-	u64 cmd_get;
-	u64 cmd_set;
-	u64 get_hits;
-	u64 get_misses;
-	u64 evictions;
-	u64 bytes_read;
-	u64 bytes_written;
-};
+/**
+ * @brief In Memory хранилище ключ/объект с возможностью восстановления состояния после перезапуска
+ */
+@interface Memcached : Object<Executor>
+	{
+		struct Fiber* expire_fiber;
 
-extern struct mc_stats g_mc_stats;
+	@public
+		Shard<Shard>* shard;
+		CStringHash*  mc_index;
+	}
+@end
 
-struct mc_obj* mc_obj (struct tnt_object* _obj);
+/**
+ * @brief Вывод сообщения в буфер
+ *
+ * Используем макроопределение ради вычисления размера выводимой строки на этапе
+ * компиляции (работает только для константных строк)
+ */
+#define ADD_IOV_LITERAL(_noreply, _wbuf, _s) \
+	({ \
+		if (!(_noreply)) \
+			net_add_iov ((_wbuf), (_s), sizeof (_s) - 1); \
+	})
 
-int mc_len (const struct mc_obj* _m);
+/**
+ * @brief Преобразование строки в беззнаковое 64-битовое целое
+ */
+u64 natoq (const char* _start, const char* _end);
 
-const char* mc_key (const struct mc_obj* _m);
-
-const char* mc_suffix (const struct mc_obj* _m);
-
-const char* mc_value (const struct mc_obj* _m);
-
+/**
+ * @brief Конструктор набора параметров команды
+ */
 void init (struct mc_params* _params);
 
-bool expired (struct tnt_object* _obj);
+/**
+ * @brief Вывести сообщение об ошибке протокола
+ */
+void protoError (struct mc_params* _params, struct netmsg_head* _wbuf);
 
-bool missing (struct tnt_object* _obj);
+/**
+ * @brief Добавить к статистике количество прочитанных байт
+ */
+void statsAddRead (u64 _bytes);
 
-int addOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _value);
+/**
+ * @brief Реализация команды SET протокола memcached
+ */
+void set (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
 
-int delete (Memcached* _memc, const char* _keys[], int _n);
+/**
+ * @brief Реализация команды ADD протокола memcached
+ */
+void add (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
 
-void print_stats (struct netmsg_head* _wbuf);
+/**
+ * @brief Реализация команды REPLACE протокола memcached
+ */
+void replace (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
 
-void flush_all (va_list _ap);
+/**
+ * @brief Реализация команды CAS протокола memcached
+ */
+void cas (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
 
+/**
+ * @brief Реализация команд APPEND и PREPEND протокола memcached
+ */
+void append (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, bool _back);
+
+/**
+ * @brief Реализация команд INCR и DECR протокола memcached
+ */
+void inc (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, int _sign);
+
+/**
+ * @brief Реализация команды DELETE протокола memcached
+ */
+void eraseKey (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
+
+/**
+ * @brief Реализация команд GETS и GET протокола memcached
+ */
+void get (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, bool _show_cas);
+
+/**
+ * @brief Реализация команды FLUSH_ALL протокола memcached
+ */
+void flushAll (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
+
+/**
+ * @brief Реализация команды STATS протокола memcached
+ */
+void printStats (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
+
+/**
+ * @brief Парсер и диспетчер команд
+ */
 int memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg_head* _wbuf);
 
-#endif
+#endif /* __OCTOPUS_MEMCACHED_H */

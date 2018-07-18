@@ -24,89 +24,15 @@
  * SUCH DAMAGE.
  */
 #import <util.h>
-#import <fiber.h>
+#import <index.h>
+#import <tbuf.h>
 #import <net_io.h>
 #import <say.h>
-#import <tbuf.h>
-#import <index.h>
+#import <fiber.h>
 
 #include <string.h>
 
 #import "store.h"
-
-/**
- * @brief Преобразование строки в беззнаковое 64-битовое целое
- */
-static u64
-natoq (const char* _start, const char* _end)
-{
-	u64 num = 0;
-	while (_start < _end)
-		num = num*10 + (*_start++ - '0');
-	return num;
-}
-
-/**
- * @brief Проверка, является ли заданная строка беззнаковым целым числом
- */
-static bool
-is_numeric (const char* _field, u32 _vlen)
-{
-	for (int i = 0; i < _vlen; ++i)
-	{
-		if ((_field[i] < '0') || ('9' < _field[i]))
-			return false;
-	}
-
-	return true;
-}
-
-/**
- * @brief Получить указатель на первый ключ в списке
- *
- * Каждый ключ завершается символом '\0', после возврата указатель @a _k указывает
- * на память за символом '\0' возвращённого ключа. Данная функция модифицирует как
- * параметр @a _k, так и память, на которую он указывает
- */
-static char*
-next_key (char** _k)
-{
-	char* r = *_k;
-	char* p;
-	char* s;
-
-	if (!r)
-		return NULL;
-
-	//
-	// Ищем первый пробельный символ
-	//
-	for (p = r; (*p != ' ') && (*p != '\r') && (*p != '\n'); ++p)
-		;
-
-	//
-	// Начало анализируемой строки
-	//
-	s = p;
-
-	//
-	// Проматываем все пробелы
-	//
-	while (*p == ' ')
-		p++;
-
-	//
-	// Если это не конец строки
-	//
-	if ((*p != '\r') && (*p != '\n'))
-		*_k = p;
-	else
-		*_k = NULL;
-
-	*s = 0;
-
-	return r;
-}
 
 /**
  * @brief Квотирование символов '\r', '\n' и непечатных символов
@@ -157,251 +83,6 @@ quote (const char* _p, int _len)
 	return buf;
 }
 
-/**
- * @brief Вывод сообщения в буфер
- *
- * Используем макроопределение ради вычисления размера выводимой строки на этапе
- * компиляции
- */
-#define ADD_IOV_LITERAL(_noreply, _wbuf, _s) \
-	({ \
-		if (!(_noreply)) \
-			net_add_iov ((_wbuf), (_s), sizeof (_s) - 1); \
-	})
-
-static void
-set4key (Memcached* _memc, const char* _key, struct mc_params* _params, struct netmsg_head* _wbuf)
-{
-	++g_mc_stats.cmd_set;
-
-	if (_params->bytes > (1 << 20))
-	{
-		ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR object too large for cache\r\n");
-	}
-	else
-	{
-		if (addOrReplace (_memc, _key, _params->exptime, _params->flags, _params->bytes, _params->data) > 0)
-		{
-			g_mc_stats.total_items++;
-
-			ADD_IOV_LITERAL (_params->noreply, _wbuf, "STORED\r\n");
-		}
-		else
-		{
-			ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR\r\n");
-		}
-	}
-}
-
-static void
-set (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
-{
-	const char* key = next_key (&_params->keys);
-
-	set4key (_memc, key, _params, _wbuf);
-}
-
-static void
-add (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
-{
-	const char* key = next_key (&_params->keys);
-
-	struct tnt_object* o = [_memc->mc_index find:key];
-	if (!missing (o))
-		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_STORED\r\n");
-	else
-		set4key (_memc, key, _params, _wbuf);
-}
-
-static void
-replace (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
-{
-	const char* key = next_key (&_params->keys);
-
-	struct tnt_object* o = [_memc->mc_index find:key];
-	if (missing (o))
-		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_STORED\r\n");
-	else
-		set4key (_memc, key, _params, _wbuf);
-}
-
-static void
-cas (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
-{
-	const char* key = next_key (&_params->keys);
-
-	struct tnt_object* o = [_memc->mc_index find:key];
-	if (missing (o))
-		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_FOUND\r\n");
-	else if (mc_obj (o)->cas != _params->value)
-		ADD_IOV_LITERAL (_params->noreply, _wbuf, "EXISTS\r\n");
-	else
-		set4key (_memc, key, _params, _wbuf);
-}
-
-static void
-append (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, bool _back)
-{
-	char* key = next_key (&_params->keys);
-
-	struct tnt_object* o = [_memc->mc_index find:key];
-	if (missing (o))
-	{
-		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_STORED\r\n");
-	}
-	else
-	{
-		struct mc_obj* m = mc_obj (o);
-		struct tbuf*   b = tbuf_alloc (fiber->pool);
-
-		if (_back)
-		{
-			tbuf_append (b, mc_value (m), m->value_len);
-			tbuf_append (b, _params->data, _params->bytes);
-		}
-		else
-		{
-			tbuf_append (b, _params->data, _params->bytes);
-			tbuf_append (b, mc_value (m), m->value_len);
-		}
-
-		_params->bytes += m->value_len;
-		_params->data   = (char*)b->ptr;
-
-		set4key (_memc, key, _params, _wbuf);
-	}
-}
-
-static void
-inc (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, int _sign)
-{
-	const char* key = next_key (&_params->keys);
-
-	struct tnt_object* o = [_memc->mc_index find:key];
-	if (missing (o))
-	{
-		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_FOUND\r\n");
-	}
-	else
-	{
-		struct mc_obj* m = mc_obj (o);
-
-		if (is_numeric (mc_value (m), m->value_len))
-		{
-			++g_mc_stats.cmd_set;
-
-			u64 value = natoq (mc_value (m), mc_value (m) + m->value_len);
-
-			if (_sign > 0)
-			{
-				value += _params->value;
-			}
-			else
-			{
-				if (_params->value > value)
-					value = 0;
-				else
-					value -= _params->value;
-			}
-
-			struct tbuf* b = tbuf_alloc (fiber->pool);
-			tbuf_printf (b, "%"PRIu64, value);
-
-			if (addOrReplace (_memc, key, m->exptime, m->flags, tbuf_len(b), b->ptr))
-			{
-				++g_mc_stats.total_items;
-
-				if (!_params->noreply)
-				{
-					net_add_iov (_wbuf, b->ptr, tbuf_len (b));
-					ADD_IOV_LITERAL (_params->noreply, _wbuf, "\r\n");
-				}
-			}
-			else
-			{
-				ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR\r\n");
-			}
-		}
-		else
-		{
-			ADD_IOV_LITERAL (_params->noreply, _wbuf, "CLIENT_ERROR cannot increment or decrement non-numeric value\r\n");
-		}
-	}
-}
-
-static void
-deleteKey (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
-{
-	const char* key = next_key (&_params->keys);
-
-	struct tnt_object* o = [_memc->mc_index find:key];
-	if (missing(o))
-	{
-		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_FOUND\r\n");
-	}
-	else
-	{
-		if (delete (_memc, &key, 1) > 0)
-			ADD_IOV_LITERAL (_params->noreply, _wbuf, "DELETED\r\n");
-		else
-			ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR\r\n");
-	}
-}
-
-static void
-get (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, bool _show_cas)
-{
-	++g_mc_stats.cmd_get;
-
-	const char* key;
-	while ((key = next_key (&_params->keys)))
-	{
-		struct tnt_object* o = [_memc->mc_index find:key];
-
-		if (missing (o))
-		{
-			++g_mc_stats.get_misses;
-			continue;
-		}
-
-		++g_mc_stats.get_hits;
-
-		struct mc_obj* m = mc_obj (o);
-		const char* suffix = mc_suffix (m);
-		const char* value  = mc_value (m);
-
-		if (_show_cas)
-		{
-			struct tbuf* b = tbuf_alloc (fiber->pool);
-			tbuf_printf (b, "VALUE %s %"PRIu32" %"PRIu32" %"PRIu64"\r\n", key, m->flags, m->value_len, m->cas);
-			net_add_iov (_wbuf, b->ptr, tbuf_len (b));
-			g_mc_stats.bytes_written += tbuf_len (b);
-		}
-		else
-		{
-			ADD_IOV_LITERAL (_params->noreply, _wbuf, "VALUE ");
-			net_add_iov (_wbuf, key, m->key_len - 1);
-			net_add_iov (_wbuf, suffix, m->suffix_len);
-		}
-
-		net_add_obj_iov (_wbuf, o, value, m->value_len);
-		ADD_IOV_LITERAL (_params->noreply, _wbuf, "\r\n");
-
-		g_mc_stats.bytes_written += m->value_len + 2;
-	}
-
-	ADD_IOV_LITERAL (_params->noreply, _wbuf, "END\r\n");
-
-	g_mc_stats.bytes_written += 5;
-}
-
-static void
-flushAll (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
-{
-	fiber_create ("flush_all", flush_all, _memc, _params->delay);
-	ADD_IOV_LITERAL (_params->noreply, _wbuf, "OK\r\n");
-}
-
 %%machine memcached;
 %%write data;
 
@@ -414,12 +95,12 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 	int cs;
 
 	//
-	// Начало анализируемого буфера
+	// Начало анализируемого буфера (используется конечным автоматом Ragel)
 	//
 	char* p = (char*)_rbuf->ptr;
 
 	//
-	// Конец анализируемого буфера
+	// Конец анализируемого буфера (используется конечным автоматом Ragel)
 	//
 	char* pe = (char*)_rbuf->end;
 
@@ -532,9 +213,7 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 			//
 			if (strncmp ((char *)(p + params.bytes), "\r\n", 2) != 0)
 			{
-				say_warn ("%s, memcached proto error", __PRETTY_FUNCTION__);
-				ADD_IOV_LITERAL (params.noreply, _wbuf, "ERROR\r\n");
-				g_mc_stats.bytes_written += 7;
+				protoError (&params, _wbuf);
 				return -1;
 			}
 
@@ -551,7 +230,7 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 
 		action done
 		{
-			g_mc_stats.bytes_read += p - (char*)_rbuf->ptr;
+			statsAddRead (p - (char*)_rbuf->ptr);
 			tbuf_ltrim (_rbuf, p - (char*)_rbuf->ptr);
 
 			done = true;
@@ -578,10 +257,10 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 		cas       = "cas"i spc key spc flags spc exptime spc bytes spc value noreply spc? eol @read @done @{ cas (_memc, &params, _wbuf); };
 		gets      = "gets"i spc keys spc? eol @done @{ get (_memc, &params, _wbuf, true); };
 		get       = "get"i spc keys spc? eol @done @{ get (_memc, &params, _wbuf, false); };
-		delete    = "delete"i spc key (spc exptime)? noreply spc? eol @done @{ deleteKey (_memc, &params, _wbuf); };
+		delete    = "delete"i spc key (spc exptime)? noreply spc? eol @done @{ eraseKey (_memc, &params, _wbuf); };
 		incr      = "incr"i spc key spc value noreply spc? eol @done @{ inc (_memc, &params, _wbuf,  1); };
 		decr      = "decr"i spc key spc value noreply spc? eol @done @{ inc (_memc, &params, _wbuf, -1); };
-		stats     = "stats"i eol @done @{ print_stats (_wbuf); };
+		stats     = "stats"i eol @done @{ printStats (_memc, &params, _wbuf); };
 		flush_all = "flush_all"i (spc delay)? noreply spc? eol @done @{ flushAll (_memc, &params, _wbuf); };
 		quit      = "quit"i eol @done @{ return 0; };
 
@@ -609,9 +288,7 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 		say_debug ("%s, parse failed at: `%s'", __PRETTY_FUNCTION__, quote(p, (int)(pe - p)));
 		if ((pe - p) > (1 << 20))
 		{
-			say_warn ("%s, memcached proto error", __PRETTY_FUNCTION__);
-			ADD_IOV_LITERAL (params.noreply, _wbuf, "ERROR\r\n");
-			g_mc_stats.bytes_written += 7;
+			protoError (&params, _wbuf);
 			return -1;
 		}
 
