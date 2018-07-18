@@ -169,7 +169,6 @@ quote (const char* _p, int _len)
 			net_add_iov ((_wbuf), (_s), sizeof (_s) - 1); \
 	})
 
-
 static void
 set4key (Memcached* _memc, const char* _key, struct mc_params* _params, struct netmsg_head* _wbuf)
 {
@@ -430,9 +429,9 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 	bool done = false;
 
 	//
-	// Маркер начала значения
+	// Вспомогательный маркер начала значения
 	//
-	char* mark;
+	const char* mark;
 
 	//
 	// Параметры выполняемой команды
