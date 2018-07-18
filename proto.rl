@@ -23,7 +23,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
 #import <util.h>
 #import <fiber.h>
 #import <net_io.h>
@@ -32,7 +31,7 @@
 
 #include <string.h>
 
-#import <mod/memcached/store.h>
+#import "store.h"
 
 %%{
 	machine memcached;
@@ -40,40 +39,70 @@
 }%%
 
 
+/**
+ * @brief Преобразование строки в беззнаковое 64-битовое целое
+ */
 static u64
-natoq(const char *start, const char *end)
+natoq (const char* _start, const char* _end)
 {
 	u64 num = 0;
-	while (start < end)
-		num = num * 10 + (*start++ - '0');
+	while (_start < _end)
+		num = num*10 + (*(_start++) - '0');
 	return num;
 }
 
-
+/**
+ * @brief Проверка, является ли заданная строка беззнаковым целым числом
+ */
 static bool
-is_numeric(const char *field, u32 value_len)
+is_numeric (const char* _field, u32 _vlen)
 {
-	for (int i = 0; i < value_len; i++)
-		if (field[i] < '0' || '9' < field[i])
+	for (int i = 0; i < _vlen; ++i)
+	{
+		if ((_field[i] < '0') || ('9' < _field[i]))
 			return false;
+	}
+
 	return true;
 }
 
-
-static char *
-next_key(char **k)
+static char*
+next_key (char** _k)
 {
-	char *r = *k, *p, *s;
-	if (unlikely(!r))
+	char* r = *_k;
+	char* p;
+	char* s;
+
+	if (unlikely (!r))
 		return NULL;
-	for (p = r; *p != ' ' && *p != '\r' && *p != '\n'; p++);
+
+	//
+	// Ищем первый пробельный символ
+	//
+	for (p = r; (*p != ' ') && (*p != '\r') && (*p != '\n'); ++p)
+		;
+
+	//
+	// Начало анализируемой строки
+	//
 	s = p;
-	while (*p == ' ') p++;
-	if (*p != '\r' && *p != '\n')
-		*k = p;
+
+	//
+	// Проматываем все пробелы
+	//
+	while (*p == ' ')
+		p++;
+
+	//
+	// Если это не конец строки
+	//
+	if ((*p != '\r') && (*p != '\n'))
+		*_k = p;
 	else
-		*k = NULL;
+		*_k = NULL;
+
 	*s = 0;
+
 	return r;
 }
 
@@ -135,12 +164,12 @@ memcached_dispatch(Memcached *memc, int fd,
 })
 
 #define STORE() ({							\
-	mc_stats.cmd_set++;						\
+	g_mc_stats.cmd_set++;						\
 	if (bytes > (1<<20)) {						\
 		ADD_IOV_LITERAL("SERVER_ERROR object too large for cache\r\n"); \
 	} else {							\
 		if (store(memc, key, exptime, flags, bytes, data)) {	\
-			mc_stats.total_items++;				\
+			g_mc_stats.total_items++;				\
 			ADD_IOV_LITERAL("STORED\r\n");		\
 		} else {						\
 			ADD_IOV_LITERAL("SERVER_ERROR\r\n");	\
@@ -233,9 +262,9 @@ memcached_dispatch(Memcached *memc, int fd,
 					data = b->ptr;
 					bytes = tbuf_len(b);
 
-					mc_stats.cmd_set++;
+					g_mc_stats.cmd_set++;
 					if (store(memc, key, exptime, flags, bytes, data)) {
-						mc_stats.total_items++;
+						g_mc_stats.total_items++;
 						if (!noreply) {
 							net_add_iov(wbuf, b->ptr, tbuf_len(b));
 							ADD_IOV_LITERAL("\r\n");
@@ -257,7 +286,7 @@ memcached_dispatch(Memcached *memc, int fd,
 			if (missing(obj)) {
 				ADD_IOV_LITERAL("NOT_FOUND\r\n");
 			} else {
-				if (delete(memc, &key, 1)) {
+				if (delete(memc, (const char**)&key, 1)) {
 					ADD_IOV_LITERAL("DELETED\r\n");
 				} else {
 					ADD_IOV_LITERAL("SERVER_ERROR\r\n");
@@ -266,16 +295,16 @@ memcached_dispatch(Memcached *memc, int fd,
 		}
 
 		action get {
-			mc_stats.cmd_get++;
+			g_mc_stats.cmd_get++;
 			char *key;
 			while ((key = next_key(&kstart))) {
 				struct tnt_object *obj = [mc_index find:key];
 
 				if (missing(obj)) {
-					mc_stats.get_misses++;
+					g_mc_stats.get_misses++;
 					continue;
 				}
-				mc_stats.get_hits++;
+				g_mc_stats.get_hits++;
 
 				struct mc_obj *m = mc_obj(obj);
 				const char *suffix = m->data + m->key_len;
@@ -284,9 +313,9 @@ memcached_dispatch(Memcached *memc, int fd,
 				if (show_cas) {
 					struct tbuf *b = tbuf_alloc(fiber->pool);
 					tbuf_printf(b, "VALUE %s %"PRIu32" %"PRIu32" %"PRIu64"\r\n",
-						    key, m->flags, m->value_len, m->cas);
+							key, m->flags, m->value_len, m->cas);
 					net_add_iov(wbuf, b->ptr, tbuf_len(b));
-					mc_stats.bytes_written += tbuf_len(b);
+					g_mc_stats.bytes_written += tbuf_len(b);
 				} else {
 					ADD_IOV_LITERAL("VALUE ");
 					net_add_iov(wbuf, key, strlen(key));
@@ -294,10 +323,10 @@ memcached_dispatch(Memcached *memc, int fd,
 				}
 				net_add_obj_iov(wbuf, obj, value, m->value_len);
 				ADD_IOV_LITERAL("\r\n");
-				mc_stats.bytes_written += m->value_len + 2;
+				g_mc_stats.bytes_written += m->value_len + 2;
 			}
 			ADD_IOV_LITERAL("END\r\n");
-			mc_stats.bytes_written += 5;
+			g_mc_stats.bytes_written += 5;
 		}
 
 		action flush_all {
@@ -372,7 +401,7 @@ memcached_dispatch(Memcached *memc, int fd,
 
 		action done {
 			done = true;
-			mc_stats.bytes_read += p - (char *)rbuf->ptr;
+			g_mc_stats.bytes_read += p - (char *)rbuf->ptr;
 			tbuf_ltrim(rbuf, p - (char *)rbuf->ptr);
 		}
 
@@ -399,7 +428,7 @@ memcached_dispatch(Memcached *memc, int fd,
 		flush_all = "flush_all"i (spc flush_delay)? noreply spc? eol @done @flush_all;
 		quit = "quit"i eol @done @quit;
 
-	        main := set | cas | add | replace | append | prepend |
+			main := set | cas | add | replace | append | prepend |
 			get | gets | delete | incr | decr | stats | flush_all | quit;
 		write init;
 		write exec;
@@ -411,7 +440,7 @@ memcached_dispatch(Memcached *memc, int fd,
 		exit:
 			say_warn("memcached proto error");
 			ADD_IOV_LITERAL("ERROR\r\n");
-			mc_stats.bytes_written += 7;
+			g_mc_stats.bytes_written += 7;
 			return -1;
 		}
 		char *r;

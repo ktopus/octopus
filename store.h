@@ -23,71 +23,43 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
 #ifndef OCTOPUS_MEMCACHED_H
 #define OCTOPUS_MEMCACHED_H
 
 #include <util.h>
 #include <index.h>
-#import <log_io.h>
 
-@interface Memcached : Object <Executor> {
-	Fiber *expire_fiber;
+#import <log_io.h>
+#import <fiber.h>
+
+@interface Memcached : Object<Executor>
+{
+	struct Fiber* expire_fiber;
+
 @public
-	Shard<Shard> *shard;
-	CStringHash *mc_index;
+	Shard<Shard>* shard;
+	CStringHash*  mc_index;
 }
 @end
 
-
-enum object_type {
+enum object_type
+{
 	MC_OBJ = 1
 };
 
-struct mc_obj {
+struct mc_obj
+{
 	u32 exptime;
 	u32 flags;
 	u64 cas;
 	u16 key_len; /* including \0 */
 	u16 suffix_len;
 	u32 value_len;
-	char data[0]; /* key + '\0' + suffix + '\n' +  data + '\n' */
+	char data[0]; /* key + '\0' + suffix + '\r''\n' +  data + '\n' */
 } __attribute__((packed));
 
-static inline struct mc_obj * __attribute__((always_inline))
-mc_obj(struct tnt_object *obj)
+struct mc_stats
 {
-	if (unlikely(obj->type != MC_OBJ))
-		abort();
-	return (struct mc_obj *)obj->data;
-}
-
-static inline int
-mc_len(const struct mc_obj *m) { return sizeof(*m) + m->key_len + m->suffix_len + m->value_len; }
-
-static inline const char *
-mc_value(const struct mc_obj *m) { return m->data + m->key_len + m->suffix_len; }
-
-static inline bool
-expired(struct tnt_object *obj)
-{
-	if (cfg.memcached_no_expire)
-		return 0;
-	struct mc_obj *m = mc_obj(obj);
- 	return m->exptime == 0 ? 0 : m->exptime < ev_now();
-}
-
-static inline bool
-missing(struct tnt_object *obj)
-{
-	return obj == NULL || object_ghost(obj) || expired(obj);
-}
-
-int store(Memcached *memc, const char *key, u32 exptime, u32 flags, u32 value_len, char *value);
-int delete(Memcached *memc, char **keys, int n);
-void flush_all(va_list ap);
-
-extern struct mc_stats {
 	u64 total_items;
 	u32 curr_connections;
 	u32 total_connections;
@@ -98,9 +70,30 @@ extern struct mc_stats {
 	u64 evictions;
 	u64 bytes_read;
 	u64 bytes_written;
-} mc_stats;
-void print_stats(struct netmsg_head *wbuf);
+};
 
-int __attribute__((noinline))
-memcached_dispatch(Memcached *memc, int fd, struct tbuf *rbuf, struct netmsg_head *wbuf);
+extern struct mc_stats g_mc_stats;
+
+struct mc_obj* mc_obj (struct tnt_object* _obj);
+
+int mc_len (const struct mc_obj* _m);
+
+const char* mc_key (const struct mc_obj* _m);
+
+const char* mc_value (const struct mc_obj* _m);
+
+bool expired (struct tnt_object* _obj);
+
+bool missing (struct tnt_object* _obj);
+
+int store (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _value_len, const char* _value);
+
+int delete (Memcached* _memc, const char* _keys[], int _n);
+
+void print_stats (struct netmsg_head* _wbuf);
+
+void flush_all (va_list _ap);
+
+int memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg_head* _wbuf);
+
 #endif
