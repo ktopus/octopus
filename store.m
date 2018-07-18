@@ -104,7 +104,7 @@ mc_alloc (const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _va
  * Используется при восстановлении данных из журнала и/или снапшота
  */
 static void
-delete_only (Memcached* _memc, const char* _key)
+onlyDelete (Memcached* _memc, const char* _key)
 {
 	struct tnt_object* o = [_memc->mc_index find:_key];
 	if (o)
@@ -120,7 +120,7 @@ delete_only (Memcached* _memc, const char* _key)
  * Используется при восстановлении данных из журнала и/или снапшота
  */
 static void
-store_only (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _value, u64 _cas)
+onlyStore (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _value, u64 _cas)
 {
 	struct tnt_object* o = mc_alloc (_key, _exptime, _flags, _vlen, _value, _cas);
 	object_incr_ref (o);
@@ -135,7 +135,7 @@ store_only (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _v
 	//
 	// Удаляем из кэша объект с таким же ключём
 	//
-	delete_only (_memc, _key);
+	onlyDelete (_memc, _key);
 
 	//
 	// Добавляем объект в кэш
@@ -147,10 +147,10 @@ store_only (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _v
  * @brief Восстановление данных из журнала и/или снапшота
  */
 static void
-store_compat (Memcached* _memc, struct tbuf* _op)
+onlyStoreCompat (Memcached* _memc, struct tbuf* _op)
 {
 	int   klen = read_varint32 (_op);
-	char *key  = read_bytes (_op, klen);
+	char* key  = read_bytes (_op, klen);
 
 	int meta_len = read_varint32 (_op);
 	assert (meta_len == 16);
@@ -165,7 +165,22 @@ store_compat (Memcached* _memc, struct tbuf* _op)
 	int   vlen  = read_varint32 (_op);
 	char* value = read_bytes (_op, vlen);
 
-	store_only (_memc, key, exptime, flags, vlen, value, cas);
+	onlyStore (_memc, key, exptime, flags, vlen, value, cas);
+}
+
+/**
+ * @brief Восстановление данных из журнала и/или снапшота
+ */
+static void
+onlyDeleteCompat (Memcached* _memc, struct tbuf* _op)
+{
+	int klen = read_varint32 (_op);
+
+	char key[klen + 1];
+	memcpy (key, _op->ptr, klen);
+	key[klen] = 0;
+
+	onlyDelete (_memc, key);
 }
 
 static void
@@ -428,7 +443,7 @@ apply:(struct tbuf*)_op tag:(u16)_tag
 			struct mc_obj* m = (struct mc_obj*)_op->ptr;
 			say_debug ("%s, STORE %s", __PRETTY_FUNCTION__, mc_key (m));
 
-			store_only (self, mc_key (m), m->exptime, m->flags, m->value_len, mc_value (m), m->cas);
+			onlyStore (self, mc_key (m), m->exptime, m->flags, m->value_len, mc_value (m), m->cas);
 			break;
 		}
 
@@ -438,7 +453,7 @@ apply:(struct tbuf*)_op tag:(u16)_tag
 				const char* key = (const char*)_op->ptr;
 				say_debug ("%s, DELETE %s", __PRETTY_FUNCTION__, key);
 
-				delete_only (self, key);
+				onlyDelete (self, key);
 				tbuf_ltrim (_op, strlen (key) + 1);
 			}
 			break;
@@ -460,7 +475,7 @@ apply:(struct tbuf*)_op tag:(u16)_tag
 					read_u32 (_op); /* flags */
 					read_u32 (_op); /* cardinality */
 
-					store_compat (self, _op);
+					onlyStoreCompat (self, _op);
 					break;
 				}
 
@@ -469,13 +484,8 @@ apply:(struct tbuf*)_op tag:(u16)_tag
 					say_debug ("%s, DELETE(compat)", __PRETTY_FUNCTION__);
 
 					read_u32 (_op); /* key cardinality */
-					int klen = read_varint32 (_op);
 
-					char* key  = palloc (fiber->pool, klen + 1);
-					memcpy (key, _op->ptr, klen);
-					key[klen] = 0;
-
-					delete_only (self, key);
+					onlyDeleteCompat (self, _op);
 					break;
 				}
 
@@ -495,7 +505,7 @@ apply:(struct tbuf*)_op tag:(u16)_tag
 			read_u32 (_op); /* cardinality */
 			read_u32 (_op); /* data_size */
 
-			store_compat (self, _op);
+			onlyStoreCompat (self, _op);
 			break;
 
 		default:
@@ -587,30 +597,51 @@ mc_key (const struct mc_obj* _m)
 }
 
 const char*
+mc_suffix (const struct mc_obj* _m)
+{
+	return _m->data + _m->key_len;
+}
+
+const char*
 mc_value (const struct mc_obj* _m)
 {
 	return _m->data + _m->key_len + _m->suffix_len;
 }
 
+void
+init (struct mc_params* _params)
+{
+	assert (_params != NULL);
+
+	_params->keys     = NULL;
+	_params->noreply  = false;
+	_params->value    = 0;
+	_params->flags    = 0;
+	_params->exptime  = 0;
+	_params->bytes    = 0;
+	_params->delay    = 0;
+	_params->data     = NULL;
+}
+
 bool
-expired (struct tnt_object* _obj)
+expired (struct tnt_object* _o)
 {
 	if (cfg.memcached_no_expire)
 		return false;
 
-	struct mc_obj* m = mc_obj (_obj);
+	struct mc_obj* m = mc_obj (_o);
 
 	return (m->exptime == 0) ? false : m->exptime < ev_now ();
 }
 
 bool
-missing (struct tnt_object* _obj)
+missing (struct tnt_object* _o)
 {
-	return (_obj == NULL) || object_ghost (_obj) || expired (_obj);
+	return (_o == NULL) || object_ghost (_o) || expired (_o);
 }
 
 int
-store (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _value)
+addOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _value)
 {
 	if ([_memc->shard is_replica])
 		return 0;
@@ -618,8 +649,8 @@ store (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, 
 	//
 	// Создаём объект для сохранения в кэше
 	//
-	struct tnt_object* obj = mc_alloc (_key, _exptime, _flags, _vlen, _value, 0);
-	object_incr_ref (obj);
+	struct tnt_object* o = mc_alloc (_key, _exptime, _flags, _vlen, _value, 0);
+	object_incr_ref (o);
 
 	@try
 	{
@@ -628,22 +659,22 @@ store (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, 
 		// объект в кэше, чтобы он не мог быть удалён или изменён в
 		// параллельных соединениях
 		//
-		struct tnt_object* old_obj = NULL;
-		if ((old_obj = [_memc->mc_index find_obj:obj]))
-			object_lock (old_obj);
+		struct tnt_object* oo = NULL;
+		if ((oo = [_memc->mc_index find_obj:o]))
+			object_lock (oo);
 
 		//
 		// Пишем данные о добавляемом объекте в лог
 		//
 		{
-			struct mc_obj* m = mc_obj (obj);
+			struct mc_obj* m = mc_obj (o);
 			if ([_memc->shard submit:m len:mc_len (m) tag:STORE|TAG_WAL] != 1)
 			{
 				//
 				// Если объект в кэше был заблокирован, то разблокируем его
 				//
-				if (old_obj)
-					object_unlock (old_obj);
+				if (oo)
+					object_unlock (oo);
 
 				//
 				// Выбрасываем исключение о невозможности записи в журнал
@@ -660,7 +691,7 @@ store (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, 
 		// далее по коду он не используется и другие соединения могут его
 		// модифицировать как угодно)
 		//
-		[_memc->mc_index replace:obj];
+		[_memc->mc_index replace:o];
 
 		//
 		// Если в кэше был объект с тем же ключом, то разблокируем его и
@@ -668,10 +699,10 @@ store (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, 
 		// в кэше не находится и он в любом случае будет удалён. Но всё
 		// равно для чистоты кода разблокируем)
 		//
-		if (old_obj)
+		if (oo)
 		{
-			object_unlock (old_obj);
-			object_decr_ref (old_obj);
+			object_unlock (oo);
+			object_decr_ref (oo);
 		}
 
 		//
@@ -691,7 +722,7 @@ store (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, 
 	// В случае ошибки удаляем созданный объект и возвращаем нулевое
 	// количество добавленных/изменённых объектов
 	//
-	object_decr_ref (obj);
+	object_decr_ref (o);
 	return 0;
 }
 

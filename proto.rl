@@ -28,16 +28,11 @@
 #import <net_io.h>
 #import <say.h>
 #import <tbuf.h>
+#import <index.h>
 
 #include <string.h>
 
 #import "store.h"
-
-%%{
-	machine memcached;
-	write data;
-}%%
-
 
 /**
  * @brief Преобразование строки в беззнаковое 64-битовое целое
@@ -47,7 +42,7 @@ natoq (const char* _start, const char* _end)
 {
 	u64 num = 0;
 	while (_start < _end)
-		num = num*10 + (*(_start++) - '0');
+		num = num*10 + (*_start++ - '0');
 	return num;
 }
 
@@ -66,6 +61,13 @@ is_numeric (const char* _field, u32 _vlen)
 	return true;
 }
 
+/**
+ * @brief Получить указатель на первый ключ в списке
+ *
+ * Каждый ключ завершается символом '\0', после возврата указатель @a _k указывает
+ * на память за символом '\0' возвращённого ключа. Данная функция модифицирует как
+ * параметр @a _k, так и память, на которую он указывает
+ */
 static char*
 next_key (char** _k)
 {
@@ -73,7 +75,7 @@ next_key (char** _k)
 	char* p;
 	char* s;
 
-	if (unlikely (!r))
+	if (!r)
 		return NULL;
 
 	//
@@ -106,362 +108,530 @@ next_key (char** _k)
 	return r;
 }
 
+/**
+ * @brief Квотирование символов '\r', '\n' и непечатных символов
+ *
+ * Результат работы функции сохраняется во внутреннем буфере и возвращается
+ * указатель на него
+ */
 static const char *
-quote(const char *p, int len)
+quote (const char* _p, int _len)
 {
-	const int qlen = 40;
-	static char buf[40 * 2 + 3 + 1]; /* qlen * 2 + '...' + \0 */
-	char *b = buf;
-	for (int i = 0; i < MIN(len, qlen); i++) {
-		if (' ' <= p[i] && p[i] <= 'z') {
-			*b++ = p[i];
-			continue;
+	static char buf[40*2 + 3 + 1]; /* 40*2 + '...' + \0 */
+
+	char* b = buf;
+
+	for (int i = 0; i < MIN (_len, 40); ++i)
+	{
+		if ((' ' <= _p[i]) && (_p[i] <= 'z'))
+		{
+			*b++ = _p[i];
 		}
-		if (p[i] == '\r') {
+
+		else if (_p[i] == '\r')
+		{
 			*b++ = '\\';
 			*b++ = 'r';
-			continue;
 		}
-		if (p[i] == '\n') {
+
+		else if (_p[i] == '\n')
+		{
 			*b++ = '\\';
 			*b++ = 'n';
-			continue;
 		}
-		*b++ = '?';
+		else
+		{
+			*b++ = '?';
+		}
 	}
-	if (len > qlen) {
-		*b++ = '.'; *b++ = '.'; *b++ = '.';
+
+	if (_len > 40)
+	{
+		*b++ = '.';
+		*b++ = '.';
+		*b++ = '.';
 	}
-	*b = 0;
+
+	*b = '\0';
+
 	return buf;
 }
 
-int __attribute__((noinline))
-memcached_dispatch(Memcached *memc, int fd,
-		   struct tbuf *rbuf, struct netmsg_head *wbuf)
+/**
+ * @brief Вывод сообщения в буфер
+ *
+ * Используем макроопределение ради вычисления размера выводимой строки на этапе
+ * компиляции
+ */
+#define ADD_IOV_LITERAL(_noreply, _wbuf, _s) \
+	({ \
+		if (!(_noreply)) \
+			net_add_iov ((_wbuf), (_s), sizeof (_s) - 1); \
+	})
+
+
+static void
+set4key (Memcached* _memc, const char* _key, struct mc_params* _params, struct netmsg_head* _wbuf)
 {
+	++g_mc_stats.cmd_set;
+
+	if (_params->bytes > (1 << 20))
+	{
+		ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR object too large for cache\r\n");
+	}
+	else
+	{
+		if (addOrReplace (_memc, _key, _params->exptime, _params->flags, _params->bytes, _params->data) > 0)
+		{
+			g_mc_stats.total_items++;
+
+			ADD_IOV_LITERAL (_params->noreply, _wbuf, "STORED\r\n");
+		}
+		else
+		{
+			ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR\r\n");
+		}
+	}
+}
+
+static void
+set (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
+{
+	const char* key = next_key (&_params->keys);
+
+	set4key (_memc, key, _params, _wbuf);
+}
+
+static void
+add (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
+{
+	const char* key = next_key (&_params->keys);
+
+	struct tnt_object* o = [_memc->mc_index find:key];
+	if (!missing (o))
+		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_STORED\r\n");
+	else
+		set4key (_memc, key, _params, _wbuf);
+}
+
+static void
+replace (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
+{
+	const char* key = next_key (&_params->keys);
+
+	struct tnt_object* o = [_memc->mc_index find:key];
+	if (missing (o))
+		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_STORED\r\n");
+	else
+		set4key (_memc, key, _params, _wbuf);
+}
+
+static void
+cas (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
+{
+	const char* key = next_key (&_params->keys);
+
+	struct tnt_object* o = [_memc->mc_index find:key];
+	if (missing (o))
+		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_FOUND\r\n");
+	else if (mc_obj (o)->cas != _params->value)
+		ADD_IOV_LITERAL (_params->noreply, _wbuf, "EXISTS\r\n");
+	else
+		set4key (_memc, key, _params, _wbuf);
+}
+
+static void
+append (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, bool _back)
+{
+	char* key = next_key (&_params->keys);
+
+	struct tnt_object* o = [_memc->mc_index find:key];
+	if (missing (o))
+	{
+		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_STORED\r\n");
+	}
+	else
+	{
+		struct mc_obj* m = mc_obj (o);
+		struct tbuf*   b = tbuf_alloc (fiber->pool);
+
+		if (_back)
+		{
+			tbuf_append (b, mc_value (m), m->value_len);
+			tbuf_append (b, _params->data, _params->bytes);
+		}
+		else
+		{
+			tbuf_append (b, _params->data, _params->bytes);
+			tbuf_append (b, mc_value (m), m->value_len);
+		}
+
+		_params->bytes += m->value_len;
+		_params->data   = (char*)b->ptr;
+
+		set4key (_memc, key, _params, _wbuf);
+	}
+}
+
+static void
+inc (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, int _sign)
+{
+	const char* key = next_key (&_params->keys);
+
+	struct tnt_object* o = [_memc->mc_index find:key];
+	if (missing (o))
+	{
+		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_FOUND\r\n");
+	}
+	else
+	{
+		struct mc_obj* m = mc_obj (o);
+
+		if (is_numeric (mc_value (m), m->value_len))
+		{
+			++g_mc_stats.cmd_set;
+
+			u64 value = natoq (mc_value (m), mc_value (m) + m->value_len);
+
+			if (_sign > 0)
+			{
+				value += _params->value;
+			}
+			else
+			{
+				if (_params->value > value)
+					value = 0;
+				else
+					value -= _params->value;
+			}
+
+			struct tbuf* b = tbuf_alloc (fiber->pool);
+			tbuf_printf (b, "%"PRIu64, value);
+
+			if (addOrReplace (_memc, key, m->exptime, m->flags, tbuf_len(b), b->ptr))
+			{
+				++g_mc_stats.total_items;
+
+				if (!_params->noreply)
+				{
+					net_add_iov (_wbuf, b->ptr, tbuf_len (b));
+					ADD_IOV_LITERAL (_params->noreply, _wbuf, "\r\n");
+				}
+			}
+			else
+			{
+				ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR\r\n");
+			}
+		}
+		else
+		{
+			ADD_IOV_LITERAL (_params->noreply, _wbuf, "CLIENT_ERROR cannot increment or decrement non-numeric value\r\n");
+		}
+	}
+}
+
+static void
+deleteKey (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
+{
+	const char* key = next_key (&_params->keys);
+
+	struct tnt_object* o = [_memc->mc_index find:key];
+	if (missing(o))
+	{
+		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_FOUND\r\n");
+	}
+	else
+	{
+		if (delete (_memc, &key, 1) > 0)
+			ADD_IOV_LITERAL (_params->noreply, _wbuf, "DELETED\r\n");
+		else
+			ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR\r\n");
+	}
+}
+
+static void
+get (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, bool _show_cas)
+{
+	++g_mc_stats.cmd_get;
+
+	const char* key;
+	while ((key = next_key (&_params->keys)))
+	{
+		struct tnt_object* o = [_memc->mc_index find:key];
+
+		if (missing (o))
+		{
+			++g_mc_stats.get_misses;
+			continue;
+		}
+
+		++g_mc_stats.get_hits;
+
+		struct mc_obj* m = mc_obj (o);
+		const char* suffix = mc_suffix (m);
+		const char* value  = mc_value (m);
+
+		if (_show_cas)
+		{
+			struct tbuf* b = tbuf_alloc (fiber->pool);
+			tbuf_printf (b, "VALUE %s %"PRIu32" %"PRIu32" %"PRIu64"\r\n", key, m->flags, m->value_len, m->cas);
+			net_add_iov (_wbuf, b->ptr, tbuf_len (b));
+			g_mc_stats.bytes_written += tbuf_len (b);
+		}
+		else
+		{
+			ADD_IOV_LITERAL (_params->noreply, _wbuf, "VALUE ");
+			net_add_iov (_wbuf, key, m->key_len - 1);
+			net_add_iov (_wbuf, suffix, m->suffix_len);
+		}
+
+		net_add_obj_iov (_wbuf, o, value, m->value_len);
+		ADD_IOV_LITERAL (_params->noreply, _wbuf, "\r\n");
+
+		g_mc_stats.bytes_written += m->value_len + 2;
+	}
+
+	ADD_IOV_LITERAL (_params->noreply, _wbuf, "END\r\n");
+
+	g_mc_stats.bytes_written += 5;
+}
+
+static void
+flushAll (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
+{
+	fiber_create ("flush_all", flush_all, _memc, _params->delay);
+	ADD_IOV_LITERAL (_params->noreply, _wbuf, "OK\r\n");
+}
+
+%%machine memcached;
+%%write data;
+
+int
+memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg_head* _wbuf)
+{
+	//
+	// Переменная состояния для конечного автомата, сгенерированного Ragel
+	//
 	int cs;
-	char *p, *pe;
-	char *fstart, *kstart;
-	bool append, show_cas;
-	int incr_sign;
-	u64 cas, incr;
-	u32 flags, exptime, bytes;
-	bool noreply = false;
-	char *data = NULL;
+
+	//
+	// Начало анализируемого буфера
+	//
+	char* p = (char*)_rbuf->ptr;
+
+	//
+	// Конец анализируемого буфера
+	//
+	char* pe = (char*)_rbuf->end;
+
+	//
+	// Признак завершения обработки команды
+	//
 	bool done = false;
-	i32 flush_delay = 0;
 
-	CStringHash *mc_index = memc->mc_index;
-	p = rbuf->ptr;
-	pe = rbuf->end;
+	//
+	// Маркер начала значения
+	//
+	char* mark;
 
-	say_debug("memcached_dispatch '%s'", quote(p, (int)(pe - p)));
+	//
+	// Параметры выполняемой команды
+	//
+	struct mc_params params;
+	init (&params);
 
-#define ADD_IOV_LITERAL(s) ({						\
-	if (unlikely(!noreply))						\
-		net_add_iov(wbuf, (s), sizeof(s) - 1);	\
-})
-
-#define STORE() ({							\
-	g_mc_stats.cmd_set++;						\
-	if (bytes > (1<<20)) {						\
-		ADD_IOV_LITERAL("SERVER_ERROR object too large for cache\r\n"); \
-	} else {							\
-		if (store(memc, key, exptime, flags, bytes, data)) {	\
-			g_mc_stats.total_items++;				\
-			ADD_IOV_LITERAL("STORED\r\n");		\
-		} else {						\
-			ADD_IOV_LITERAL("SERVER_ERROR\r\n");	\
-		}							\
-	}								\
-})
+	say_debug ("%s, %s'", __PRETTY_FUNCTION__, quote (p, (int)(pe - p)));
 
 	%%{
-		action set {
-			char *key = next_key(&kstart);
-			STORE();
+		action kmark
+		{
+			//
+			// Маркировка начала ключа
+			//
+			params.keys = p;
+
+			//
+			// Проматываем указатель так, чтобы он указывал на последний символ
+			// перед символом, который не входит в ключ. Это необходимо, чтобы
+			// корректно сработал анализатор при дальнейшем разборе входного
+			// потока
+			//
+			for (; ((p + 1) < pe) && (p[1] != ' ') && (p[1] != '\r') && (p[1] != '\n'); ++p)
+				;
+
+			//
+			// Если вышли за границы буфера, то возвращаем указатель в начальное положение
+			//
+			if ((p + 1) == pe)
+				p = params.keys;
 		}
 
-		action add {
-			const char *key = next_key(&kstart);
-			struct tnt_object *obj = [mc_index find:key];
-			if (!missing(obj))
-				ADD_IOV_LITERAL("NOT_STORED\r\n");
-			else
-				STORE();
+		action ksmark
+		{
+			//
+			// Маркировка начала списка ключей, разделённых пробелами
+			//
+			params.keys = p;
+
+			//
+			// Проматываем указатель так, чтобы он указывал на последний символ
+			// перед символом, который не входит в список ключей (пробел входит).
+			// Это необходимо, чтобы корректно сработал анализатор при дальнейшем
+			// разборе входного потока
+			//
+			for (; ((p + 1) < pe) && (p[1] != '\r') && (p[1] != '\n'); ++p)
+				;
+
+			//
+			// Если вышли за границы буфера, то возвращаем указатель в начальное положение
+			//
+			if ((p + 1) == pe)
+				p = params.keys;
 		}
 
-		action replace {
-			char *key = next_key(&kstart);
-			struct tnt_object *obj = [mc_index find:key];
-			if (missing(obj))
-				ADD_IOV_LITERAL("NOT_STORED\r\n");
-			else
-				STORE();
+		action exptime
+		{
+			params.exptime = natoq (mark, p);
+			if ((params.exptime > 0) && (params.exptime <= 60*60*24*30))
+				params.exptime = params.exptime + ev_now ();
 		}
 
-		action cas {
-			char *key = next_key(&kstart);
-			struct tnt_object *obj = [mc_index find:key];
-			if (missing(obj))
-				ADD_IOV_LITERAL("NOT_FOUND\r\n");
-			else if (mc_obj(obj)->cas != cas)
-				ADD_IOV_LITERAL("EXISTS\r\n");
-			else
-				STORE();
-		}
+		action read
+		{
+			//
+			// Размер уже разобранных данных (нужно для правильного восстановления
+			// указателей парсера после догрузки данных)
+			//
+			size_t parsed = p - (char*)_rbuf->ptr;
 
-		action append_prepend {
-			char *key = next_key(&kstart);
-			struct tnt_object *obj = [mc_index find:key];
-			if (missing(obj)) {
-				ADD_IOV_LITERAL("NOT_STORED\r\n");
-			} else {
-				struct mc_obj *m = mc_obj(obj);
-				struct tbuf *b = tbuf_alloc(fiber->pool);
-				if (append) {
-					tbuf_append(b, mc_value(m), m->value_len);
-					tbuf_append(b, data, bytes);
-				} else {
-					tbuf_append(b, data, bytes);
-					tbuf_append(b, mc_value(m), m->value_len);
-				}
-
-				bytes += m->value_len;
-				data = b->ptr;
-				STORE();
-			}
-		}
-
-		action incr_decr {
-			char *key = next_key(&kstart);
-			struct tnt_object *obj = [mc_index find:key];
-			if (missing(obj)) {
-				ADD_IOV_LITERAL("NOT_FOUND\r\n");
-			} else {
-				struct mc_obj *m = mc_obj(obj);
-
-				if (is_numeric(mc_value(m), m->value_len)) {
-					u64 value = natoq(mc_value(m), mc_value(m) + m->value_len);
-
-					if (incr_sign > 0) {
-						value += incr;
-					} else {
-						if (incr > value)
-							value = 0;
-						else
-							value -= incr;
-					}
-
-					exptime = m->exptime;
-					flags = m->flags;
-
-					struct tbuf *b = tbuf_alloc(fiber->pool);
-					tbuf_printf(b, "%"PRIu64, value);
-					data = b->ptr;
-					bytes = tbuf_len(b);
-
-					g_mc_stats.cmd_set++;
-					if (store(memc, key, exptime, flags, bytes, data)) {
-						g_mc_stats.total_items++;
-						if (!noreply) {
-							net_add_iov(wbuf, b->ptr, tbuf_len(b));
-							ADD_IOV_LITERAL("\r\n");
-						}
-					} else {
-						ADD_IOV_LITERAL("SERVER_ERROR\r\n");
-					}
-				} else {
-					ADD_IOV_LITERAL("CLIENT_ERROR cannot increment or decrement"
-							" non-numeric value\r\n");
-				}
-			}
-
-		}
-
-		action delete {
-			char *key = next_key(&kstart);
-			struct tnt_object *obj = [mc_index find:key];
-			if (missing(obj)) {
-				ADD_IOV_LITERAL("NOT_FOUND\r\n");
-			} else {
-				if (delete(memc, (const char**)&key, 1)) {
-					ADD_IOV_LITERAL("DELETED\r\n");
-				} else {
-					ADD_IOV_LITERAL("SERVER_ERROR\r\n");
-				}
-			}
-		}
-
-		action get {
-			g_mc_stats.cmd_get++;
-			char *key;
-			while ((key = next_key(&kstart))) {
-				struct tnt_object *obj = [mc_index find:key];
-
-				if (missing(obj)) {
-					g_mc_stats.get_misses++;
-					continue;
-				}
-				g_mc_stats.get_hits++;
-
-				struct mc_obj *m = mc_obj(obj);
-				const char *suffix = m->data + m->key_len;
-				const char *value = mc_value(m);
-
-				if (show_cas) {
-					struct tbuf *b = tbuf_alloc(fiber->pool);
-					tbuf_printf(b, "VALUE %s %"PRIu32" %"PRIu32" %"PRIu64"\r\n",
-							key, m->flags, m->value_len, m->cas);
-					net_add_iov(wbuf, b->ptr, tbuf_len(b));
-					g_mc_stats.bytes_written += tbuf_len(b);
-				} else {
-					ADD_IOV_LITERAL("VALUE ");
-					net_add_iov(wbuf, key, strlen(key));
-					net_add_iov(wbuf, suffix, m->suffix_len);
-				}
-				net_add_obj_iov(wbuf, obj, value, m->value_len);
-				ADD_IOV_LITERAL("\r\n");
-				g_mc_stats.bytes_written += m->value_len + 2;
-			}
-			ADD_IOV_LITERAL("END\r\n");
-			g_mc_stats.bytes_written += 5;
-		}
-
-		action flush_all {
-			fiber_create("flush_all", flush_all, memc, flush_delay);
-			ADD_IOV_LITERAL("OK\r\n");
-		}
-
-		action stats {
-			print_stats(wbuf);
-		}
-
-		action quit {
-			return 0;
-		}
-
-		action fstart { fstart = p; }
-		action key_start {
-			kstart = p;
-			for (; p < pe && *p != ' ' && *p != '\r' && *p != '\n'; p++);
-			if (*p == ' ' || *p == '\r' || *p == '\n')
-				p--;
-			else
-				p = kstart;
-		}
-		action keys_start {
-			kstart = p;
-			for (; p < pe && *p != '\r' && *p != '\n'; p++);
-			if (*p == '\r' || *p == '\n')
-				p--;
-			else
-				p = kstart;
-		}
-
-		printable = [^ \t\r\n];
-		key = printable >key_start ;
-		keys = printable >keys_start ;
-
-		action exptime {
-			exptime = natoq(fstart, p);
-			if (exptime > 0 && exptime <= 60*60*24*30)
-				exptime = exptime + ev_now();
-		}
-		exptime = digit+ >fstart %exptime;
-
-		flags = digit+ >fstart %{flags = natoq(fstart, p);};
-		bytes = digit+ >fstart %{bytes = natoq(fstart, p);};
-		cas_value = digit+ >fstart %{cas = natoq(fstart, p);};
-		incr_value = digit+ >fstart %{incr = natoq(fstart, p);};
-		flush_delay = digit+ >fstart %{flush_delay = natoq(fstart, p);};
-
-		action read_data {
-			size_t parsed = p - (char *)rbuf->ptr;
-			while (tbuf_len(rbuf) - parsed < bytes + 2) {
-				int r = fiber_recv(fd, rbuf);
-				if (r <= 0) {
-					say_debug("read returned %i, closing connection", r);
+			//
+			// Пока не все указанные в команде данные прочитаны (+ \r\n)
+			//
+			while ((tbuf_len (_rbuf) - parsed) < (params.bytes + 2))
+			{
+				//
+				// Загружаем данные в буфер (здесь память буфера может быть при необходимости
+				// переаллоцирована)
+				//
+				int r = fiber_recv (_fd, _rbuf);
+				if (r <= 0)
+				{
+					say_debug ("%s, read returned %i, closing connection", __PRETTY_FUNCTION__, r);
 					return -1;
 				}
 			}
 
-			p = rbuf->ptr + parsed;
-			pe = rbuf->end;
+			//
+			// Из-за того, что буфер может переаллоцироваться при получении новых
+			// данных необходимо восстановить правильные указатели
+			//
+			p  = _rbuf->ptr + parsed;
+			pe = _rbuf->end;
 
-			data = p;
-
-			if (strncmp((char *)(p + bytes), "\r\n", 2) == 0) {
-				p += bytes + 2;
-			} else {
-				goto exit;
+			//
+			// Если данные не завершаются \r\n, то завершаем обработку команды с ошибкой
+			//
+			if (strncmp ((char *)(p + params.bytes), "\r\n", 2) != 0)
+			{
+				say_warn ("%s, memcached proto error", __PRETTY_FUNCTION__);
+				ADD_IOV_LITERAL (params.noreply, _wbuf, "ERROR\r\n");
+				g_mc_stats.bytes_written += 7;
+				return -1;
 			}
+
+			//
+			// Данные команды
+			//
+			params.data = p;
+
+			//
+			// Перематываем указатель за пределы прочитанных данных
+			//
+			p += params.bytes + 2;
 		}
 
-		action done {
+		action done
+		{
+			g_mc_stats.bytes_read += p - (char*)_rbuf->ptr;
+			tbuf_ltrim (_rbuf, p - (char*)_rbuf->ptr);
+
 			done = true;
-			g_mc_stats.bytes_read += p - (char *)rbuf->ptr;
-			tbuf_ltrim(rbuf, p - (char *)rbuf->ptr);
 		}
 
-		eol = "\r\n" @{ p++; };
-		spc = " "+;
-		noreply = (spc "noreply"i %{ noreply = true; })?;
-		store_command_body = spc key spc flags spc exptime spc bytes noreply eol;
+		printable = [^ \t\r\n];
+		key       = printable >kmark;
+		keys      = printable >ksmark;
+		exptime   = digit+ >{ mark = p; } %exptime;
+		flags     = digit+ >{ mark = p; } %{ params.flags = natoq (mark, p); };
+		bytes     = digit+ >{ mark = p; } %{ params.bytes = natoq (mark, p); };
+		value     = digit+ >{ mark = p; } %{ params.value = natoq (mark, p); };
+		delay     = digit+ >{ mark = p; } %{ params.delay = natoq (mark, p); };
+		eol       = "\r\n" @{ ++p; };
+		spc       = " "+;
+		noreply   = (spc "noreply"i %{ params.noreply = true; })?;
+		store     = spc key spc flags spc exptime spc bytes noreply eol;
 
-		set = ("set"i store_command_body) @read_data @done @set;
-		add = ("add"i store_command_body) @read_data @done @add;
-		replace = ("replace"i store_command_body) @read_data @done @replace;
-		append  = ("append"i  %{append = true; } store_command_body) @read_data @done @append_prepend;
-		prepend = ("prepend"i %{append = false;} store_command_body) @read_data @done @append_prepend;
-		cas = ("cas"i spc key spc flags spc exptime spc bytes spc cas_value noreply spc?) eol @read_data @done @cas;
+		set       = "set"i store @read @done @{ set (_memc, &params, _wbuf); };
+		add       = "add"i store @read @done @{ add (_memc, &params, _wbuf); };
+		replace   = "replace"i store @read @done @{ replace (_memc, &params, _wbuf); };
+		append    = "append"i store @read @done @{ append (_memc, &params, _wbuf, true); };
+		prepend   = "prepend"i store @read @done @{ append (_memc, &params, _wbuf, false); };
+		cas       = "cas"i spc key spc flags spc exptime spc bytes spc value noreply spc? eol @read @done @{ cas (_memc, &params, _wbuf); };
+		gets      = "gets"i spc keys spc? eol @done @{ get (_memc, &params, _wbuf, true); };
+		get       = "get"i spc keys spc? eol @done @{ get (_memc, &params, _wbuf, false); };
+		delete    = "delete"i spc key (spc exptime)? noreply spc? eol @done @{ deleteKey (_memc, &params, _wbuf); };
+		incr      = "incr"i spc key spc value noreply spc? eol @done @{ inc (_memc, &params, _wbuf,  1); };
+		decr      = "decr"i spc key spc value noreply spc? eol @done @{ inc (_memc, &params, _wbuf, -1); };
+		stats     = "stats"i eol @done @{ print_stats (_wbuf); };
+		flush_all = "flush_all"i (spc delay)? noreply spc? eol @done @{ flushAll (_memc, &params, _wbuf); };
+		quit      = "quit"i eol @done @{ return 0; };
 
-
-		get = "get"i %{show_cas = false;} spc keys spc? eol @done @get;
-		gets = "gets"i %{show_cas = true;} spc keys spc? eol @done @get;
-		delete = "delete"i spc key (spc exptime)? noreply spc? eol @done @delete;
-		incr = "incr"i %{incr_sign = 1; } spc key spc incr_value noreply spc? eol @done @incr_decr;
-		decr = "decr"i %{incr_sign = -1;} spc key spc incr_value noreply spc? eol @done @incr_decr;
-
-		stats = "stats"i eol @done @stats;
-		flush_all = "flush_all"i (spc flush_delay)? noreply spc? eol @done @flush_all;
-		quit = "quit"i eol @done @quit;
-
-			main := set | cas | add | replace | append | prepend |
-			get | gets | delete | incr | decr | stats | flush_all | quit;
-		write init;
-		write exec;
+		main := set |
+				cas |
+				add |
+				replace |
+				append |
+				prepend |
+				get |
+				gets |
+				delete |
+				incr |
+				decr |
+				stats |
+				flush_all |
+				quit;
 	}%%
 
-	if (!done) {
-		say_debug("parse failed at: `%s'", quote(p, (int)(pe - p)));
-		if (pe - p > (1 << 20)) {
-		exit:
-			say_warn("memcached proto error");
-			ADD_IOV_LITERAL("ERROR\r\n");
+	%%write init;
+	%%write exec;
+
+	if (!done)
+	{
+		say_debug ("%s, parse failed at: `%s'", __PRETTY_FUNCTION__, quote(p, (int)(pe - p)));
+		if ((pe - p) > (1 << 20))
+		{
+			say_warn ("%s, memcached proto error", __PRETTY_FUNCTION__);
+			ADD_IOV_LITERAL (params.noreply, _wbuf, "ERROR\r\n");
 			g_mc_stats.bytes_written += 7;
 			return -1;
 		}
-		char *r;
-		if ((r = memmem(p, pe - p, "\r\n", 2)) != NULL) {
-			tbuf_ltrim(rbuf, r + 2 - (char *)rbuf->ptr);
-			while (tbuf_len(rbuf) >= 2 && memcmp(rbuf->ptr, "\r\n", 2) == 0)
-				tbuf_ltrim(rbuf, 2);
-			ADD_IOV_LITERAL("CLIENT_ERROR bad command line format\r\n");
+
+		char* r;
+		if ((r = (char*)memmem (p, pe - p, "\r\n", 2)) != NULL)
+		{
+			tbuf_ltrim (_rbuf, r + 2 - (char*)_rbuf->ptr);
+
+			while ((tbuf_len (_rbuf) >= 2) && (memcmp (_rbuf->ptr, "\r\n", 2) == 0))
+				tbuf_ltrim (_rbuf, 2);
+
+			ADD_IOV_LITERAL (params.noreply, _wbuf, "CLIENT_ERROR bad command line format\r\n");
 			return 1;
 		}
+
 		return 0;
 	}
 
 	return 1;
 }
 
-
-register_source();
-
-/*
- * Local Variables:
- * mode: c
- * End:
- */
+register_source ();

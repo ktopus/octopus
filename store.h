@@ -32,14 +32,17 @@
 #import <log_io.h>
 #import <fiber.h>
 
+/**
+ * @brief In Memory хранилище ключ/объект с возможностью восстановления состояния после перезапуска
+ */
 @interface Memcached : Object<Executor>
-{
-	struct Fiber* expire_fiber;
+	{
+		struct Fiber* expire_fiber;
 
-@public
-	Shard<Shard>* shard;
-	CStringHash*  mc_index;
-}
+	@public
+		Shard<Shard>* shard;
+		CStringHash*  mc_index;
+	}
 @end
 
 enum object_type
@@ -57,6 +60,25 @@ struct mc_obj
 	u32 value_len;
 	char data[0]; /* key + '\0' + suffix + '\r''\n' +  data + '\n' */
 } __attribute__((packed));
+
+/**
+ * @brief Параметры команды
+ */
+struct mc_params
+{
+	//
+	// Маркер начала ключа или набора ключей
+	//
+	char* keys;
+
+	bool  noreply;
+	u64   value;
+	u32   flags;
+	u32   exptime;
+	u32   bytes;
+	i32   delay;
+	char* data;
+};
 
 struct mc_stats
 {
@@ -80,13 +102,17 @@ int mc_len (const struct mc_obj* _m);
 
 const char* mc_key (const struct mc_obj* _m);
 
+const char* mc_suffix (const struct mc_obj* _m);
+
 const char* mc_value (const struct mc_obj* _m);
+
+void init (struct mc_params* _params);
 
 bool expired (struct tnt_object* _obj);
 
 bool missing (struct tnt_object* _obj);
 
-int store (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _value_len, const char* _value);
+int addOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _value);
 
 int delete (Memcached* _memc, const char* _keys[], int _n);
 
