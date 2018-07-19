@@ -40,41 +40,78 @@
 #include "memcached_version.h"
 #include "store.h"
 
-enum tag
+/**
+ * @brief Тэги модификации кэша для записи в журнал
+ */
+enum MC_Tag
 {
-	ADD_OR_REPLACE = user_tag,
-	ERASE
+	MC_ADD_OR_REPLACE = user_tag,
+	MC_ERASE
 };
 
 /**
  * @brief Код объекта, заворачиваемого в структуру tnt_object
  */
-enum object_type
+enum MC_ObjectType
 {
-	MC_OBJ = 1
+	MC_OBJECT = 1
 };
 
 /**
- * @brief Ключ/значение для хранения в memcached с доп. параметрами
+ * @brief Ключ/значение с дополнительными параметрами для хранения в memcached
  *
  * Все данные хранятся в непрерывной области памяти с максимально возможной
  * упаковкой
  */
-struct mc_obj
+struct MC_Object
 {
+	/**
+	 * @brief Время жизни значения
+	 */
 	u32 exptime;
+
+	/**
+	 * @brief Флаги, связанные со значением
+	 */
 	u32 flags;
+
+	/**
+	 * @brief Параметр для команды CAS
+	 */
 	u64 cas;
-	u16 klen; /* включая \0 */
+
+	/**
+	 * @brief Длина ключа объекта вместе с завершающим '\0'
+	 */
+	u16 klen;
+
+	/**
+	 * @brief Длина суффикса объекта вместе с завершающими '\r''\n'
+	 *
+	 * Суффикс представляет собой преформатированную строку для вывода в
+	 * команде get. Сделано для ускореня ответа сервера на эту, наиболее
+	 * часто использумую, команду
+	 */
 	u16 slen;
+
+	/**
+	 * @brief Размер значения
+	 */
 	u32 vlen;
-	char data[0]; /* {key}{'\0'}{suffix}{'\r''\n'}{data} */
+
+	/**
+	 * @brief Начало данных
+	 *
+	 * Данные представляют собой непрерывную область памяти в формате:
+	 *    {key} '\0' {suffix} '\r''\n' {value}
+	 */
+	char data[0];
 } __attribute__((packed));
 
 /**
  * @brief Структура и переменная для хранения статистики
  */
-static struct mc_stats
+static struct MC_Stats
 {
 	u64 total_items;
 	u32 curr_connections;
@@ -91,36 +128,36 @@ static struct mc_stats
 /**
  * @brief Счётчик объектов
  */
-static u64 g_cas = 0;
+static u64 g_mc_cas = 0;
 
 /**
  * @brief Контекст управления памятью
  */
-static struct netmsg_pool_ctx g_ctx;
+static struct netmsg_pool_ctx g_mc_ctx;
 
 /**
  * @brief Признак использования Garbage Collector при управлении памятью
  */
-#define USE_GC 1
+#define MC_USE_GC 1
 
 /**
- * @brief Получить указатель на структуру mc_obj из структуры tnt_object
+ * @brief Получить указатель на структуру MC_Object из структуры tnt_object
  *        с проверкой типа
  */
-static inline struct mc_obj*
-mc_obj (struct tnt_object* _obj)
+static inline struct MC_Object*
+mc_object (struct tnt_object* _obj)
 {
-	if (_obj->type != MC_OBJ)
+	if (_obj->type != MC_OBJECT)
 		abort ();
 
-	return (struct mc_obj*)_obj->data;
+	return (struct MC_Object*)_obj->data;
 }
 
 /**
  * @brief Обшая длина объекта mc_obj вместе со всеми данными
  */
 static inline int
-mc_len (const struct mc_obj* _m)
+mc_len (const struct MC_Object* _m)
 {
 	return sizeof (*_m) + _m->klen + _m->slen + _m->vlen;
 }
@@ -129,7 +166,7 @@ mc_len (const struct mc_obj* _m)
  * @brief Ключ (завершается '\0')
  */
 static inline const char*
-mc_key (const struct mc_obj* _m)
+mc_key (const struct MC_Object* _m)
 {
 	return _m->data;
 }
@@ -138,7 +175,7 @@ mc_key (const struct mc_obj* _m)
  * @brief Суффикс (завершается '\r''\n')
  */
 static inline const char*
-mc_suffix (const struct mc_obj* _m)
+mc_suffix (const struct MC_Object* _m)
 {
 	return _m->data + _m->klen;
 }
@@ -147,7 +184,7 @@ mc_suffix (const struct mc_obj* _m)
  * @brief Значение (ничем не завершается, необходимо использовать vlen)
  */
 static inline const char*
-mc_value (const struct mc_obj* _m)
+mc_value (const struct MC_Object* _m)
 {
 	return _m->data + _m->klen + _m->slen;
 }
@@ -161,7 +198,7 @@ mc_expired (struct tnt_object* _o)
 	if (cfg.memcached_no_expire)
 		return false;
 
-	struct mc_obj* m = mc_obj (_o);
+	struct MC_Object* m = mc_object (_o);
 
 	return (m->exptime == 0) ? false : m->exptime < ev_now ();
 }
@@ -176,7 +213,7 @@ mc_missing (struct tnt_object* _o)
 }
 
 /**
- * @brief Упаковка параметров во вновь созданную структуру tnt_object{mc_obj}
+ * @brief Упаковка параметров во вновь созданную структуру tnt_object{MC_Object}
  *
  * Объекты с распределением USE_GC должны освобождаться только с использованием
  * object_decr_ref
@@ -190,12 +227,12 @@ mc_alloc (const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _va
 	int klen = strlen (_key) + 1;
 	int slen = strlen (suffix);
 
-	struct tnt_object *o = object_alloc (MC_OBJ, USE_GC, sizeof (struct mc_obj) + klen + slen + _vlen);
+	struct tnt_object *o = object_alloc (MC_OBJECT, MC_USE_GC, sizeof (struct MC_Object) + klen + slen + _vlen);
 
-	struct mc_obj* m = mc_obj (o);
+	struct MC_Object* m = mc_object (o);
 	m->exptime = _exptime;
 	m->flags   = _flags;
-	m->cas     = (_cas > 0) ? _cas : ++g_cas;
+	m->cas     = (_cas > 0) ? _cas : ++g_mc_cas;
 	m->klen    = klen;
 	m->slen    = slen;
 	m->vlen    = _vlen;
@@ -299,9 +336,9 @@ onlyAddOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, 
 	//
 	// Модифицируем глобальный счётчик объектов
 	//
-	struct mc_obj* m = mc_obj (o);
-	if (m->cas > g_cas)
-		g_cas = m->cas + 1;
+	struct MC_Object* m = mc_object (o);
+	if (m->cas > g_mc_cas)
+		g_mc_cas = m->cas + 1;
 
 	//
 	// Удаляем из кэша объект с таким же ключём
@@ -394,8 +431,8 @@ addOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 
 		// Пишем данные о добавляемом объекте в лог
 		//
 		{
-			struct mc_obj* m = mc_obj (o);
-			if ([_memc->shard submit:m len:mc_len (m) tag:ADD_OR_REPLACE|TAG_WAL] != 1)
+			struct MC_Object* m = mc_object (o);
+			if ([_memc->shard submit:m len:mc_len (m) tag:MC_ADD_OR_REPLACE|TAG_WAL] != 1)
 			{
 				//
 				// Если объект в кэше был заблокирован, то разблокируем его
@@ -523,15 +560,15 @@ erase (Memcached* _memc, const char* _keys[], int _n)
 		struct tbuf* b = tbuf_alloc (fiber->pool);
 		for (int i = 0; i < k; ++i)
 		{
-			struct mc_obj* m = mc_obj (objs[i]);
+			struct MC_Object* m = mc_object (objs[i]);
 
 			tbuf_append (b, m->data, m->klen);
 		}
 
 		//
-		// Если данные об удаляемых объектов удалось записать в журнал
+		// Если данные об удаляемых объектах удалось записать в журнал
 		//
-		if ([_memc->shard submit:b->ptr len:tbuf_len (b) tag:ERASE|TAG_WAL] == 1)
+		if ([_memc->shard submit:b->ptr len:tbuf_len (b) tag:MC_ERASE|TAG_WAL] == 1)
 		{
 			for (int i = 0; i < k; ++i)
 			{
@@ -605,7 +642,7 @@ flush_all (va_list _ap)
 	{
 		struct tnt_object* obj = [memc->mc_index get:i];
 		if (obj != NULL)
-			mc_obj (obj)->exptime = 1;
+			mc_object (obj)->exptime = 1;
 	}
 }
 
@@ -648,7 +685,7 @@ memcached_expire (va_list _ap __attribute__((unused)))
 			if (!mc_expired (o))
 				continue;
 
-			struct mc_obj* m = mc_obj (o);
+			struct MC_Object* m = mc_object (o);
 
 			keys[k] = palloc (fiber->pool, m->klen);
 			strcpy (keys[k], m->data);
@@ -669,15 +706,15 @@ mc_print_row (struct tbuf* _out, u16 _tag, struct tbuf* _op)
 {
 	switch(_tag & TAG_MASK)
 	{
-		case ADD_OR_REPLACE:
+		case MC_ADD_OR_REPLACE:
 		{
-			struct mc_obj* m = _op->ptr;
+			struct MC_Object* m = _op->ptr;
 			const char*    k = m->data;
 			tbuf_printf (_out, "ADD_OR_REPLACE %.*s %.*s", m->klen, k, m->vlen, mc_value (m));
 			break;
 		}
 
-		case ERASE:
+		case MC_ERASE:
 			tbuf_printf (_out, "ERASE");
 			while (tbuf_len (_op) > 0)
 			{
@@ -706,7 +743,7 @@ memcached_handler (va_list _ap)
 	Memcached* memc = va_arg (_ap, Memcached*);
 
 	struct netmsg_head wbuf;
-	netmsg_head_init (&wbuf, &g_ctx);
+	netmsg_head_init (&wbuf, &g_mc_ctx);
 
 	struct tbuf rbuf = TBUF (NULL, 0, fiber->pool);
 	palloc_register_gc_root (fiber->pool, &rbuf, tbuf_gc);
@@ -788,7 +825,7 @@ init_second_stage (va_list _ap __attribute__((unused)))
 	Memcached* memc = [[recovery shard:0] executor];
 	assert (memc != NULL);
 
-	netmsg_pool_ctx_init (&g_ctx, "stats_pool", 1024*1024);
+	netmsg_pool_ctx_init (&g_mc_ctx, "stats_pool", 1024*1024);
 
 	if (fiber_create ("memcached/acceptor", tcp_server, cfg.primary_addr, memcached_accept, NULL, memc) == NULL)
 	{
@@ -832,7 +869,7 @@ static struct index_node*
 dtor (struct tnt_object* _o, struct index_node* _n, void* _arg __attribute__((unused)))
 {
 	_n->obj     = _o;
-	_n->key.ptr = mc_obj (_o)->data;
+	_n->key.ptr = mc_object (_o)->data;
 
 	return _n;
 }
@@ -859,21 +896,21 @@ apply:(struct tbuf*)_op tag:(u16)_tag
 {
 	/*
 	 * row format is dead simple:
-	 *     ADD_OR_REPLACE -> op is mc_obj itself.
-	 *     ERASE          -> op is key array
+	 *     MC_ADD_OR_REPLACE -> op is MC_Object itself.
+	 *     MC_ERASE          -> op is key array
 	 */
 	switch (_tag & TAG_MASK)
 	{
-		case ADD_OR_REPLACE:
+		case MC_ADD_OR_REPLACE:
 		{
-			struct mc_obj* m = (struct mc_obj*)_op->ptr;
+			struct MC_Object* m = (struct MC_Object*)_op->ptr;
 			say_debug ("%s, ADD_OR_REPLACE %s", __PRETTY_FUNCTION__, mc_key (m));
 
 			onlyAddOrReplace (self, mc_key (m), m->exptime, m->flags, m->vlen, mc_value (m), m->cas);
 			break;
 		}
 
-		case ERASE:
+		case MC_ERASE:
 			while (tbuf_len (_op) > 0)
 			{
 				const char* key = (const char*)_op->ptr;
@@ -970,8 +1007,8 @@ snapshot_write_rows: (XLog*)_log
 	[mc_index iterator_init];
 	for (int i = 1; (o = [mc_index iterator_next]); ++i)
 	{
-		struct mc_obj* m = mc_obj (o);
-		if ([_log append_row:m len:mc_len (m) scn:snap_scn tag:ADD_OR_REPLACE|TAG_SNAP] == NULL)
+		struct MC_Object* m = mc_object (o);
+		if ([_log append_row:m len:mc_len (m) scn:snap_scn tag:MC_ADD_OR_REPLACE|TAG_SNAP] == NULL)
 			return -1;
 
 		if (i%100000 == 0)
@@ -1079,7 +1116,7 @@ cas (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
 	struct tnt_object* o = [_memc->mc_index find:key];
 	if (mc_missing (o))
 		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_FOUND\r\n");
-	else if (mc_obj (o)->cas != _params->value)
+	else if (mc_object (o)->cas != _params->value)
 		ADD_IOV_LITERAL (_params->noreply, _wbuf, "EXISTS\r\n");
 	else
 		addOrReplaceKey (_memc, key, _params, _wbuf);
@@ -1097,7 +1134,7 @@ append (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, 
 	}
 	else
 	{
-		struct mc_obj* m = mc_obj (o);
+		struct MC_Object* m = mc_object (o);
 		struct tbuf*   b = tbuf_alloc (fiber->pool);
 
 		if (_back)
@@ -1130,7 +1167,7 @@ inc (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, int
 	}
 	else
 	{
-		struct mc_obj* m = mc_obj (o);
+		struct MC_Object* m = mc_object (o);
 
 		if (is_numeric (mc_value (m), m->vlen))
 		{
@@ -1212,7 +1249,7 @@ get (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, boo
 
 		++g_mc_stats.get_hits;
 
-		struct mc_obj* m = mc_obj (o);
+		struct MC_Object* m = mc_object (o);
 		const char* suffix = mc_suffix (m);
 		const char* value  = mc_value (m);
 

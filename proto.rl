@@ -285,7 +285,7 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 
 	if (!done)
 	{
-		say_debug ("%s, parse failed at: `%s'", __PRETTY_FUNCTION__, quote(p, (int)(pe - p)));
+		say_debug ("%s, parse failed at: `%s'", __PRETTY_FUNCTION__, quote (p, (int)(pe - p)));
 		if ((pe - p) > (1 << 20))
 		{
 			protoError (&params, _wbuf);
