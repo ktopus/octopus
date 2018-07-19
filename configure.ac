@@ -112,21 +112,21 @@ int value;
 @implementation OneClass
 + (id) alloc
 {
-	Class class = (Class)self;
+    Class class = (Class)self;
 #if HAVE_OBJC_RUNTIME_H
-	id obj = calloc(1, class_getInstanceSize(class));
+    id obj = calloc(1, class_getInstanceSize(class));
 	object_setClass(obj, class);
 #elif HAVE_OBJC_OBJC_API_H
-	id obj = calloc(1, class_get_instance_size(class));
+    id obj = calloc(1, class_get_instance_size(class));
 	obj->class_pointer = class;
 #else
 # error Unknown runtime
 #endif
-	return obj;
+    return obj;
 }
 - (id) init
 {
-	value = 1;
+    value = 1;
 	return self;
 }
 
@@ -139,7 +139,7 @@ int value;
 int main(void)
 {
         OneClass *o = [[OneClass alloc] init];
-        return [o one] - 1;
+		return [o one] - 1;
 }
 ], [], [AC_MSG_ERROR([$CC failed to produce working _AC_LANG executable.])])
 
@@ -150,7 +150,7 @@ AC_CHECK_HEADER(gelf.h)
 AC_SEARCH_LIBS([elf_begin], [elf])
 AS_IF([test -n "$ac_cv_header_libelf_h" -a -n "$ac_cv_header_gelf_h" -a "$ac_cv_search_elf_begin" != no],
       [AC_MSG_NOTICE([Will use libelf to resolve symbol names])]
-      [AC_DEFINE(HAVE_LIBELF, 1, [Define to 1 if you have libelf installed])])
+	  [AC_DEFINE(HAVE_LIBELF, 1, [Define to 1 if you have libelf installed])])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_C_INLINE
@@ -195,9 +195,9 @@ AC_DEFUN([AC_CC_FLAG_CHECK], [
   CFLAGS="$CFLAGS $1"
   AC_LINK_IFELSE([AC_LANG_SOURCE([[int main(int argc, char **argv) { return 0; }]])],
                     [AS_TR_SH([ac_cv$1])=yes
-                     $2],
-                    [AS_TR_SH([ac_cv$1])=no]
-                     $3)
+					 $2],
+					[AS_TR_SH([ac_cv$1])=no]
+					 $3)
   AC_MSG_RESULT($[AS_TR_SH([ac_cv$1])])
   CFLAGS="$CFLAGS_saved"
 ])
@@ -215,6 +215,7 @@ AC_MSG_RESULT($ac_cv__builtin_expect)
 
 AC_CC_FLAG_CHECK([-Werror], [WCFLAGS="-Werror $WCFLAGS"])
 AC_CC_FLAG_CHECK([-Wno-sign-compare], [WCFLAGS="-Wno-sign-compare $WCFLAGS"])
+AC_CC_FLAG_CHECK([-Wno-tautological-compare], [WCFLAGS="-Wno-tautological-compare $WCFLAGS"])
 AC_CC_FLAG_CHECK([-Wextra], [WCFLAGS="-Wextra $WCFLAGS"])
 AC_SUBST(WCFLAGS)
 
@@ -226,15 +227,15 @@ AC_SUBST(XCFLAGS)
 
 AS_IF([test "x$ac_cv_werror" == xyes],
       [AC_MSG_CHECKING([whether the compiler supports __attribute__((cold))])
-       ac_cv__attribute_cold=no
-       CFLAGS_saved="$CFLAGS"
-       CFLAGS="$CFLAGS -Werror"
-       AC_COMPILE_IFELSE(
-         [AC_LANG_SOURCE([int __attribute__((cold)) x() { return 0;}])],
+	   ac_cv__attribute_cold=no
+	   CFLAGS_saved="$CFLAGS"
+	   CFLAGS="$CFLAGS -Werror"
+	   AC_COMPILE_IFELSE(
+	     [AC_LANG_SOURCE([int __attribute__((cold)) x() { return 0;}])],
 	 [ac_cv__attribute_cold=yes
 	 AC_DEFINE([HAVE__ATTRIBUTE_COLD], [1], [Define to 1 if the C compiler supports __attribute__((cold))])])
-       AC_MSG_RESULT($ac_cv__attribute_cold)
-       CFLAGS="$CFLAGS_saved"])
+	   AC_MSG_RESULT($ac_cv__attribute_cold)
+	   CFLAGS="$CFLAGS_saved"])
 
 dnl internal backtrace facility will resolve all dynamic symbols
 AC_CC_FLAG_CHECK([-Wl,--export-dynamic])
@@ -253,33 +254,33 @@ fi
 
 AC_DEFINE_UNQUOTED(OCT_BUILD_INFO,
                    ["compiled by $cc_string on $host"],
-                   [A string containing C compiler and patform info])
+				   [A string containing C compiler and patform info])
 
 AC_ARG_ENABLE([coverage],
               [AS_HELP_STRING([--enable-coverage],
-                              [compile with code coverage])],
-            [coverage=$enableval])
+			                  [compile with code coverage])],
+							[coverage=$enableval])
 AS_IF([test "x$coverage" = xyes],
       [AC_CHECK_PROG([LCOV], [lcov], [lcov])
-       AS_IF([test -n $LCOV], [AC_SUBST(HAVE_LCOV, 1)])
-       AC_SUBST(COVERAGE, 1)
-       XCFLAGS="--coverage $XCFLAGS";
-       XLDFLAGS="--coverage $XLDFLAGS"])
+	   AS_IF([test -n $LCOV], [AC_SUBST(HAVE_LCOV, 1)])
+	   AC_SUBST(COVERAGE, 1)
+	   XCFLAGS="--coverage $XCFLAGS";
+	   XLDFLAGS="--coverage $XLDFLAGS"])
 
 AC_ARG_ENABLE([valgrind],
               [AS_HELP_STRING([--enable-valgrind],
-                              [compile with Valgring support])],
-            [valgrind=$enableval])
+			                  [compile with Valgring support])],
+							[valgrind=$enableval])
 AS_IF([test "x$valgrind" == xyes],
       [AS_IF([test $ac_cv_header_valgrind_valgrind_h == no],
-             AC_MSG_ERROR([unable to find valgrind headers]))],
-      [AC_DEFINE(NVALGRIND, 1, [Define to 1 if Valgrind support should be disabled])])
+	         AC_MSG_ERROR([unable to find valgrind headers]))],
+			[AC_DEFINE(NVALGRIND, 1, [Define to 1 if Valgrind support should be disabled])])
 
 AC_ARG_ENABLE([clients],
               [AS_HELP_STRING([--enable-clients[[=libiproto]]],
-                              [select clients to build, libiproto by default])],
-              [octopus_clients=$enableval],
-              [octopus_clients="libiproto"])
+			                  [select clients to build, libiproto by default])],
+							[octopus_clients=$enableval],
+			  [octopus_clients="libiproto"])
 AC_SUBST(clients, [$octopus_clients])
 
 m4_include(modules.m4)
