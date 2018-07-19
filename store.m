@@ -1138,7 +1138,7 @@ eraseKey (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf
 	const char* key = next_key (&_params->keys);
 
 	struct tnt_object* o = [_memc->mc_index find:key];
-	if (mc_missing(o))
+	if (mc_missing (o))
 	{
 		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_FOUND\r\n");
 	}
