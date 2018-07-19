@@ -235,9 +235,11 @@ box_rollback_meta(struct box_meta_txn *txn)
 	case CREATE_OBJECT_SPACE:
 		free(txn->object_space);
 		txn->object_space = NULL;
+		__attribute__ ((fallthrough));
 	case CREATE_INDEX:
 		[txn->index free];
 		txn->index = nil;
+		__attribute__ ((fallthrough));
 	}
 }
 
