@@ -145,12 +145,12 @@ static struct netmsg_pool_ctx g_mc_ctx;
  *        с проверкой типа
  */
 static inline struct MC_Object*
-mc_object (struct tnt_object* _obj)
+mc_object (struct tnt_object* _o)
 {
-	if (_obj->type != MC_OBJECT)
+	if (_o->type != MC_OBJECT)
 		abort ();
 
-	return (struct MC_Object*)_obj->data;
+	return (struct MC_Object*)_o->data;
 }
 
 /**
