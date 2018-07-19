@@ -56,16 +56,19 @@ enum object_type
 
 /**
  * @brief Ключ/значение для хранения в memcached с доп. параметрами
+ *
+ * Все данные хранятся в непрерывной области памяти с максимально возможной
+ * упаковкой
  */
 struct mc_obj
 {
 	u32 exptime;
 	u32 flags;
 	u64 cas;
-	u16 key_len; /* including \0 */
-	u16 suffix_len;
-	u32 value_len;
-	char data[0]; /* key + '\0' + suffix + '\r''\n' +  data + '\n' */
+	u16 klen; /* включая \0 */
+	u16 slen;
+	u32 vlen;
+	char data[0]; /* {key}{'\0'}{suffix}{'\r''\n'}{data} */
 } __attribute__((packed));
 
 /**
@@ -100,6 +103,10 @@ static struct netmsg_pool_ctx g_ctx;
  */
 #define USE_GC 1
 
+/**
+ * @brief Получить указатель на структуру mc_obj из структуры tnt_object
+ *        с проверкой типа
+ */
 static inline struct mc_obj*
 mc_obj (struct tnt_object* _obj)
 {
@@ -109,30 +116,45 @@ mc_obj (struct tnt_object* _obj)
 	return (struct mc_obj*)_obj->data;
 }
 
+/**
+ * @brief Обшая длина объекта mc_obj вместе со всеми данными
+ */
 static inline int
 mc_len (const struct mc_obj* _m)
 {
-	return sizeof (*_m) + _m->key_len + _m->suffix_len + _m->value_len;
+	return sizeof (*_m) + _m->klen + _m->slen + _m->vlen;
 }
 
+/**
+ * @brief Ключ (завершается '\0')
+ */
 static inline const char*
 mc_key (const struct mc_obj* _m)
 {
 	return _m->data;
 }
 
+/**
+ * @brief Суффикс (завершается '\r''\n')
+ */
 static inline const char*
 mc_suffix (const struct mc_obj* _m)
 {
-	return _m->data + _m->key_len;
+	return _m->data + _m->klen;
 }
 
+/**
+ * @brief Значение (ничем не завершается, необходимо использовать vlen)
+ */
 static inline const char*
 mc_value (const struct mc_obj* _m)
 {
-	return _m->data + _m->key_len + _m->suffix_len;
+	return _m->data + _m->klen + _m->slen;
 }
 
+/**
+ * @brief Время жизни значения
+ */
 static inline bool
 mc_expired (struct tnt_object* _o)
 {
@@ -144,6 +166,9 @@ mc_expired (struct tnt_object* _o)
 	return (m->exptime == 0) ? false : m->exptime < ev_now ();
 }
 
+/**
+ * @brief Невалидность значения
+ */
 static inline bool
 mc_missing (struct tnt_object* _o)
 {
@@ -153,8 +178,8 @@ mc_missing (struct tnt_object* _o)
 /**
  * @brief Упаковка параметров во вновь созданную структуру tnt_object{mc_obj}
  *
- * Объекты с таким распределением должны освобождаться только с использованием
- *
+ * Объекты с распределением USE_GC должны освобождаться только с использованием
+ * object_decr_ref
  */
 static struct tnt_object*
 mc_alloc (const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _value, u64 _cas)
@@ -168,12 +193,12 @@ mc_alloc (const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _va
 	struct tnt_object *o = object_alloc (MC_OBJ, USE_GC, sizeof (struct mc_obj) + klen + slen + _vlen);
 
 	struct mc_obj* m = mc_obj (o);
-	m->exptime    = _exptime;
-	m->flags      = _flags;
-	m->cas        = (_cas > 0) ? _cas : ++g_cas;
-	m->key_len    = klen;
-	m->suffix_len = slen;
-	m->value_len  = _vlen;
+	m->exptime = _exptime;
+	m->flags   = _flags;
+	m->cas     = (_cas > 0) ? _cas : ++g_cas;
+	m->klen    = klen;
+	m->slen    = slen;
+	m->vlen    = _vlen;
 
 	memcpy (m->data, _key, klen);
 	memcpy (m->data + klen, suffix, slen);
@@ -297,11 +322,20 @@ onlyEraseCompat (Memcached* _memc, struct tbuf* _op)
 {
 	int klen = read_varint32 (_op);
 
-	char key[klen + 1];
+	//
+	// Так как потенциально размеры значения могут быть весьма велики, то
+	// на стеке память не распределяем. Так же не используем palloc, поскольку
+	// для него нет зеркальной функции освобождения памяти, что для случая
+	// загрузки данных из снапшота или журнала приведёт к росту захваченной,
+	// но не освобождённой памяти (пока не будет вызван fiber_gc)
+	//
+	char* key = xmalloc (klen + 1);
 	memcpy (key, _op->ptr, klen);
 	key[klen] = 0;
 
 	onlyErase (_memc, key);
+
+	free (key);
 }
 
 /**
@@ -331,6 +365,7 @@ onlyAddOrReplaceCompat (Memcached* _memc, struct tbuf* _op)
 
 /**
  * @brief Добавить или обновить объект в кэше с записью информации в журнал
+ *        с блокировками объектов от параллельной модификации
  */
 static int
 addOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _value)
@@ -420,6 +455,7 @@ addOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 
 
 /**
  * @brief Удалить объект из кэша с записью информации в журнал
+ *        с блокировками объектов от параллельной модификации
  */
 static int
 erase (Memcached* _memc, const char* _keys[], int _n)
@@ -489,7 +525,7 @@ erase (Memcached* _memc, const char* _keys[], int _n)
 		{
 			struct mc_obj* m = mc_obj (objs[i]);
 
-			tbuf_append (b, m->data, m->key_len);
+			tbuf_append (b, m->data, m->klen);
 		}
 
 		//
@@ -529,22 +565,29 @@ addOrReplaceKey (Memcached* _memc, const char* _key, struct mc_params* _params, 
 {
 	++g_mc_stats.cmd_set;
 
+	//
+	// В идеале эту проверку надо бы поместить в парсер, чтобы не грузить
+	// через сеть заведомо слишком большие объекты, однако поскольку клиент
+	// может сначала пытаться всё пропихнуть на сервер и только потом
+	// анализировать его ответы, то проверку выполняем здесь после полного
+	// получения данных от клиента
+	//
 	if (_params->bytes > (1 << 20))
 	{
+		say_debug ("%s, object too large %u", __PRETTY_FUNCTION__, _params->bytes);
 		ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR object too large for cache\r\n");
+		return;
+	}
+
+	if (addOrReplace (_memc, _key, _params->exptime, _params->flags, _params->bytes, _params->data) > 0)
+	{
+		g_mc_stats.total_items++;
+
+		ADD_IOV_LITERAL (_params->noreply, _wbuf, "STORED\r\n");
 	}
 	else
 	{
-		if (addOrReplace (_memc, _key, _params->exptime, _params->flags, _params->bytes, _params->data) > 0)
-		{
-			g_mc_stats.total_items++;
-
-			ADD_IOV_LITERAL (_params->noreply, _wbuf, "STORED\r\n");
-		}
-		else
-		{
-			ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR\r\n");
-		}
+		ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR\r\n");
 	}
 }
 
@@ -575,7 +618,7 @@ memcached_expire (va_list _ap __attribute__((unused)))
 	Shard<Shard>* shard = [recovery shard:0];
 	Memcached*    memc  = [shard executor];
 
-	char** keys = malloc (cfg.memcached_expire_per_loop*sizeof(void*));
+	char** keys = xmalloc (cfg.memcached_expire_per_loop*sizeof(void*));
 
 	u32 i = 0;
 
@@ -607,7 +650,7 @@ memcached_expire (va_list _ap __attribute__((unused)))
 
 			struct mc_obj* m = mc_obj (o);
 
-			keys[k] = palloc (fiber->pool, m->key_len);
+			keys[k] = palloc (fiber->pool, m->klen);
 			strcpy (keys[k], m->data);
 			++k;
 		}
@@ -630,7 +673,7 @@ mc_print_row (struct tbuf* _out, u16 _tag, struct tbuf* _op)
 		{
 			struct mc_obj* m = _op->ptr;
 			const char*    k = m->data;
-			tbuf_printf (_out, "ADD_OR_REPLACE %.*s %.*s", m->key_len, k, m->value_len, mc_value (m));
+			tbuf_printf (_out, "ADD_OR_REPLACE %.*s %.*s", m->klen, k, m->vlen, mc_value (m));
 			break;
 		}
 
@@ -826,7 +869,7 @@ apply:(struct tbuf*)_op tag:(u16)_tag
 			struct mc_obj* m = (struct mc_obj*)_op->ptr;
 			say_debug ("%s, ADD_OR_REPLACE %s", __PRETTY_FUNCTION__, mc_key (m));
 
-			onlyAddOrReplace (self, mc_key (m), m->exptime, m->flags, m->value_len, mc_value (m), m->cas);
+			onlyAddOrReplace (self, mc_key (m), m->exptime, m->flags, m->vlen, mc_value (m), m->cas);
 			break;
 		}
 
@@ -977,8 +1020,8 @@ init (struct mc_params* _params)
 	_params->value    = 0;
 	_params->flags    = 0;
 	_params->exptime  = 0;
-	_params->bytes    = 0;
 	_params->delay    = 0;
+	_params->bytes    = 0;
 	_params->data     = NULL;
 }
 
@@ -1059,16 +1102,16 @@ append (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, 
 
 		if (_back)
 		{
-			tbuf_append (b, mc_value (m), m->value_len);
+			tbuf_append (b, mc_value (m), m->vlen);
 			tbuf_append (b, _params->data, _params->bytes);
 		}
 		else
 		{
 			tbuf_append (b, _params->data, _params->bytes);
-			tbuf_append (b, mc_value (m), m->value_len);
+			tbuf_append (b, mc_value (m), m->vlen);
 		}
 
-		_params->bytes += m->value_len;
+		_params->bytes += m->vlen;
 		_params->data   = (char*)b->ptr;
 
 		addOrReplaceKey (_memc, key, _params, _wbuf);
@@ -1089,11 +1132,11 @@ inc (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, int
 	{
 		struct mc_obj* m = mc_obj (o);
 
-		if (is_numeric (mc_value (m), m->value_len))
+		if (is_numeric (mc_value (m), m->vlen))
 		{
 			++g_mc_stats.cmd_set;
 
-			u64 value = natoq (mc_value (m), mc_value (m) + m->value_len);
+			u64 value = natoq (mc_value (m), mc_value (m) + m->vlen);
 
 			if (_sign > 0)
 			{
@@ -1176,21 +1219,21 @@ get (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, boo
 		if (_show_cas)
 		{
 			struct tbuf* b = tbuf_alloc (fiber->pool);
-			tbuf_printf (b, "VALUE %s %"PRIu32" %"PRIu32" %"PRIu64"\r\n", key, m->flags, m->value_len, m->cas);
+			tbuf_printf (b, "VALUE %s %"PRIu32" %"PRIu32" %"PRIu64"\r\n", key, m->flags, m->vlen, m->cas);
 			net_add_iov (_wbuf, b->ptr, tbuf_len (b));
 			g_mc_stats.bytes_written += tbuf_len (b);
 		}
 		else
 		{
 			ADD_IOV_LITERAL (_params->noreply, _wbuf, "VALUE ");
-			net_add_iov (_wbuf, key, m->key_len - 1);
-			net_add_iov (_wbuf, suffix, m->suffix_len);
+			net_add_iov (_wbuf, key, m->klen - 1);
+			net_add_iov (_wbuf, suffix, m->slen);
 		}
 
-		net_add_obj_iov (_wbuf, o, value, m->value_len);
+		net_add_obj_iov (_wbuf, o, value, m->vlen);
 		ADD_IOV_LITERAL (_params->noreply, _wbuf, "\r\n");
 
-		g_mc_stats.bytes_written += m->value_len + 2;
+		g_mc_stats.bytes_written += m->vlen + 2;
 	}
 
 	ADD_IOV_LITERAL (_params->noreply, _wbuf, "END\r\n");

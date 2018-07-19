@@ -38,17 +38,44 @@
  */
 struct mc_params
 {
-	//
-	// Маркер начала ключа или набора ключей
-	//
+	/**
+	 * @brief Указатель на ключ или набор ключей
+	 */
 	char* keys;
 
-	bool  noreply;
-	u64   value;
-	u32   flags;
-	u32   exptime;
-	u32   bytes;
-	i32   delay;
+	/**
+	 * @brief Признак того, что клиент не ожидает ответов от сервера
+	 */
+	bool noreply;
+
+	/**
+	 * @brief Аргумент для команд CAS и INCR/DECR
+	 */
+	u64 value;
+
+	/**
+	 * @brief Флаги значения
+	 */
+	u32 flags;
+
+	/**
+	 * @brief Время жизни значения
+	 */
+	u32 exptime;
+
+	/**
+	 * @brief Задержка выполнения команды flush_all
+	 */
+	i32 delay;
+
+	/**
+	 * @brief Размер данных, связанных с командой
+	 */
+	u32 bytes;
+
+	/**
+	 * @brief Указатель на данные
+	 */
 	char* data;
 };
 
@@ -57,11 +84,12 @@ struct mc_params
  */
 @interface Memcached : Object<Executor>
 	{
-		struct Fiber* expire_fiber;
+		Fiber* expire_fiber;
 
 	@public
 		Shard<Shard>* shard;
-		CStringHash*  mc_index;
+
+		CStringHash* mc_index;
 	}
 @end
 
@@ -69,7 +97,7 @@ struct mc_params
  * @brief Вывод сообщения в буфер
  *
  * Используем макроопределение ради вычисления размера выводимой строки на этапе
- * компиляции (работает только для константных строк)
+ * компиляции (соответственно работает только для константных строк)
  */
 #define ADD_IOV_LITERAL(_noreply, _wbuf, _s) \
 	({ \
@@ -149,6 +177,8 @@ void printStats (Memcached* _memc, struct mc_params* _params, struct netmsg_head
 
 /**
  * @brief Парсер и диспетчер команд
+ *
+ * Реализован в proto.rl с использованием Ragel
  */
 int memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg_head* _wbuf);
 
