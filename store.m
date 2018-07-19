@@ -919,22 +919,22 @@ status_changed
 - (int)
 snapshot_write_rows: (XLog*)_log
 {
-	u32                i = 0;
 	struct tnt_object* o = NULL;
+	i64 snap_scn = [shard scn];
 
 	title ("dumper of pid %" PRIu32 ": dumping actions", getppid ());
 
 	[mc_index iterator_init];
-	while ((o = [mc_index iterator_next]))
+	for (int i = 1; (o = [mc_index iterator_next]); ++i)
 	{
 		struct mc_obj* m = mc_obj (o);
-		if ([_log append_row:m len:mc_len (m) shard:nil tag:ADD_OR_REPLACE|TAG_SNAP] == NULL)
+		if ([_log append_row:m len:mc_len (m) scn:snap_scn tag:ADD_OR_REPLACE|TAG_SNAP] == NULL)
 			return -1;
 
-		if ((++i)%100000 == 0)
+		if (i%100000 == 0)
 		{
 			say_info ("%s, %.1fM rows written", __PRETTY_FUNCTION__, i/1000000.0);
-			title ("dumper of pid %" PRIu32 ": dumping actions (%.1fM  rows )", getppid (), i / 1000000.);
+			title ("dumper of pid %" PRIu32 ": dumping actions (%.1fM  rows )", getppid (), i/1000000.0);
 		}
 
 		if (i%10000 == 0)
