@@ -879,7 +879,7 @@ dtor (struct tnt_object* _o, struct index_node* _n, void* _arg __attribute__((un
 init
 {
 	[super init];
-	mc_index = [[CStringHash alloc] init:NULL dtor: NULL];
+	mc_index = [[CStringHash alloc] init:NULL dtor:NULL];
 	mc_index->dtor = dtor;
 
 	return self;
