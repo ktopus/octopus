@@ -127,7 +127,7 @@ static struct MC_Stats
 } g_mc_stats = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 /**
- * @brief Счётчик объектов
+ * @brief Счётчик объектов для работы команды CAS
  */
 static u64 g_mc_cas = 0;
 
@@ -226,7 +226,7 @@ mc_alloc (const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _va
 	int klen = strlen (_key) + 1;
 	int slen = strlen (suffix);
 
-	struct tnt_object *o = object_alloc (MC_OBJECT, MC_USE_GC, sizeof (struct MC_Object) + klen + slen + _vlen);
+	struct tnt_object* o = object_alloc (MC_OBJECT, MC_USE_GC, sizeof (struct MC_Object) + klen + slen + _vlen);
 
 	struct MC_Object* m = mc_object (o);
 	m->exptime = _exptime;
