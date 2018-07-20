@@ -352,6 +352,9 @@ onlyAddOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, 
 
 /**
  * @brief Восстановление данных из журнала и/или снапшота
+ *
+ * Используется при восстановлении данных из журнала и/или снапшота
+ * сохраннных старой версией сервера
  */
 static void
 onlyEraseCompat (Memcached* _memc, struct tbuf* _op)
@@ -376,6 +379,9 @@ onlyEraseCompat (Memcached* _memc, struct tbuf* _op)
 
 /**
  * @brief Восстановление данных из журнала и/или снапшота
+ *
+ * Используется при восстановлении данных из журнала и/или снапшота
+ * сохраннных старой версией сервера
  */
 static void
 onlyAddOrReplaceCompat (Memcached* _memc, struct tbuf* _op)
@@ -518,7 +524,7 @@ erase (Memcached* _memc, const char* _keys[], int _n)
 		//
 		// Если объект с заданным ключом найден в кэше
 		//
-		if ((objs[k] = [_memc->mc_index find:*(_keys++)]))
+		if ((objs[k] = [_memc->mc_index find:*_keys++]))
 		{
 			@try
 			{
