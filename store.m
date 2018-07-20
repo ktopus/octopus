@@ -81,16 +81,17 @@ struct MC_Object
 	u64 cas;
 
 	/**
-	 * @brief Длина ключа объекта вместе с завершающим '\0'
+	 * @brief Длина ключа объекта (вместе с завершающим '\0')
 	 */
 	u16 klen;
 
 	/**
-	 * @brief Длина суффикса объекта вместе с завершающими '\r''\n'
+	 * @brief Длина суффикса объекта
 	 *
 	 * Суффикс представляет собой преформатированную строку для вывода в
-	 * команде get. Сделано для ускореня ответа сервера на эту, наиболее
-	 * часто использумую, команду
+	 * команде get. Сделано для ускорения ответа сервера на эту, наиболее
+	 * часто использумую, команду. Суффикс включает в себя завершающие
+	 * символы '\r''\n'
 	 */
 	u16 slen;
 
@@ -103,7 +104,7 @@ struct MC_Object
 	 * @brief Начало данных
 	 *
 	 * Данные представляют собой непрерывную область памяти в формате:
-	 *    {key} '\0' {suffix} '\r''\n' {value}
+	 *    {key'\0'}{suffix'\r''\n'}{value}
 	 */
 	char data[0];
 } __attribute__((packed));
@@ -142,13 +143,11 @@ static struct netmsg_pool_ctx g_mc_ctx;
 
 /**
  * @brief Получить указатель на структуру MC_Object из структуры tnt_object
- *        с проверкой типа
  */
 static inline struct MC_Object*
 mc_object (struct tnt_object* _o)
 {
-	if (_o->type != MC_OBJECT)
-		abort ();
+	assert (_o->type == MC_OBJECT);
 
 	return (struct MC_Object*)_o->data;
 }
@@ -163,7 +162,7 @@ mc_len (const struct MC_Object* _m)
 }
 
 /**
- * @brief Ключ (завершается '\0')
+ * @brief Ключ (завершается '\0', так что можно использовать стандартные функции)
  */
 static inline const char*
 mc_key (const struct MC_Object* _m)
@@ -172,7 +171,7 @@ mc_key (const struct MC_Object* _m)
 }
 
 /**
- * @brief Суффикс (завершается '\r''\n')
+ * @brief Суффикс (завершается '\r''\n', но лучше использовать slen)
  */
 static inline const char*
 mc_suffix (const struct MC_Object* _m)
@@ -301,7 +300,7 @@ next_key (char** _k)
 	else
 		*_k = NULL;
 
-	*s = 0;
+	*s = '\0';
 
 	return r;
 }
@@ -368,7 +367,7 @@ onlyEraseCompat (Memcached* _memc, struct tbuf* _op)
 	//
 	char* key = xmalloc (klen + 1);
 	memcpy (key, _op->ptr, klen);
-	key[klen] = 0;
+	key[klen] = '\0';
 
 	onlyErase (_memc, key);
 
