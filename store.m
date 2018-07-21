@@ -145,7 +145,7 @@ static struct netmsg_pool_ctx g_mc_ctx;
  * @brief Получить указатель на структуру MC_Object из структуры tnt_object
  */
 static inline struct MC_Object*
-mc_object (struct tnt_object* _o)
+mc_o_get (struct tnt_object* _o)
 {
 	assert (_o->type == MC_OBJECT);
 
@@ -156,7 +156,7 @@ mc_object (struct tnt_object* _o)
  * @brief Обшая длина объекта mc_obj вместе со всеми данными
  */
 static inline int
-mc_len (const struct MC_Object* _m)
+mc_o_len (const struct MC_Object* _m)
 {
 	return sizeof (*_m) + _m->klen + _m->slen + _m->vlen;
 }
@@ -165,7 +165,7 @@ mc_len (const struct MC_Object* _m)
  * @brief Ключ (завершается '\0', так что можно использовать стандартные функции)
  */
 static inline const char*
-mc_key (const struct MC_Object* _m)
+mc_o_key (const struct MC_Object* _m)
 {
 	return _m->data;
 }
@@ -174,7 +174,7 @@ mc_key (const struct MC_Object* _m)
  * @brief Суффикс (завершается '\r''\n', но лучше использовать slen)
  */
 static inline const char*
-mc_suffix (const struct MC_Object* _m)
+mc_o_sfx (const struct MC_Object* _m)
 {
 	return _m->data + _m->klen;
 }
@@ -183,7 +183,7 @@ mc_suffix (const struct MC_Object* _m)
  * @brief Значение (ничем не завершается, необходимо использовать vlen)
  */
 static inline const char*
-mc_value (const struct MC_Object* _m)
+mc_o_val (const struct MC_Object* _m)
 {
 	return _m->data + _m->klen + _m->slen;
 }
@@ -197,7 +197,7 @@ mc_expired (struct tnt_object* _o)
 	if (cfg.memcached_no_expire)
 		return false;
 
-	struct MC_Object* m = mc_object (_o);
+	struct MC_Object* m = mc_o_get (_o);
 
 	return (m->exptime == 0) ? false : m->exptime < ev_now ();
 }
@@ -218,7 +218,7 @@ mc_missing (struct tnt_object* _o)
  * object_decr_ref
  */
 static struct tnt_object*
-mc_alloc (const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _value, u64 _cas)
+mc_o_new (const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _value, u64 _cas)
 {
 	char suffix[43] = {0};
 	snprintf (suffix, sizeof (suffix) - 1, " %"PRIu32" %"PRIu32"\r\n", _flags, _vlen);
@@ -228,7 +228,7 @@ mc_alloc (const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _va
 
 	struct tnt_object* o = object_alloc (MC_OBJECT, MC_USE_GC, sizeof (struct MC_Object) + klen + slen + _vlen);
 
-	struct MC_Object* m = mc_object (o);
+	struct MC_Object* m = mc_o_get (o);
 	m->exptime = _exptime;
 	m->flags   = _flags;
 	m->cas     = (_cas > 0) ? _cas : ++g_mc_cas;
@@ -329,13 +329,13 @@ onlyErase (Memcached* _memc, const char* _key)
 static void
 onlyAddOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _value, u64 _cas)
 {
-	struct tnt_object* o = mc_alloc (_key, _exptime, _flags, _vlen, _value, _cas);
+	struct tnt_object* o = mc_o_new (_key, _exptime, _flags, _vlen, _value, _cas);
 	object_incr_ref (o);
 
 	//
 	// Модифицируем глобальный счётчик объектов
 	//
-	struct MC_Object* m = mc_object (o);
+	struct MC_Object* m = mc_o_get (o);
 	if (m->cas > g_mc_cas)
 		g_mc_cas = m->cas + 1;
 
@@ -418,7 +418,7 @@ addOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 
 	//
 	// Создаём объект для сохранения в кэше
 	//
-	struct tnt_object* o = mc_alloc (_key, _exptime, _flags, _vlen, _value, 0);
+	struct tnt_object* o = mc_o_new (_key, _exptime, _flags, _vlen, _value, 0);
 	object_incr_ref (o);
 
 	@try
@@ -436,8 +436,8 @@ addOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 
 		// Пишем данные о добавляемом объекте в лог
 		//
 		{
-			struct MC_Object* m = mc_object (o);
-			if ([_memc->shard submit:m len:mc_len (m) tag:MC_ADD_OR_REPLACE|TAG_WAL] != 1)
+			struct MC_Object* m = mc_o_get (o);
+			if ([_memc->shard submit:m len:mc_o_len (m) tag:MC_ADD_OR_REPLACE|TAG_WAL] != 1)
 			{
 				//
 				// Если объект в кэше был заблокирован, то разблокируем его
@@ -565,9 +565,9 @@ erase (Memcached* _memc, const char* _keys[], int _n)
 		struct tbuf* b = tbuf_alloc (fiber->pool);
 		for (int i = 0; i < k; ++i)
 		{
-			struct MC_Object* m = mc_object (objs[i]);
+			struct MC_Object* m = mc_o_get (objs[i]);
 
-			tbuf_append (b, m->data, m->klen);
+			tbuf_append (b, mc_o_key (m), m->klen);
 		}
 
 		//
@@ -647,7 +647,7 @@ flush_all (va_list _ap)
 	{
 		struct tnt_object* obj = [memc->mc_index get:i];
 		if (obj != NULL)
-			mc_object (obj)->exptime = 1;
+			mc_o_get (obj)->exptime = 1;
 	}
 }
 
@@ -690,7 +690,7 @@ memcached_expire (va_list _ap __attribute__((unused)))
 			if (!mc_expired (o))
 				continue;
 
-			struct MC_Object* m = mc_object (o);
+			struct MC_Object* m = mc_o_get (o);
 
 			keys[k] = palloc (fiber->pool, m->klen);
 			strcpy (keys[k], m->data);
@@ -715,7 +715,7 @@ mc_print_row (struct tbuf* _out, u16 _tag, struct tbuf* _op)
 		{
 			struct MC_Object* m = _op->ptr;
 			const char*    k = m->data;
-			tbuf_printf (_out, "ADD_OR_REPLACE %.*s %.*s", m->klen, k, m->vlen, mc_value (m));
+			tbuf_printf (_out, "ADD_OR_REPLACE %.*s %.*s", m->klen, k, m->vlen, mc_o_val (m));
 			break;
 		}
 
@@ -874,7 +874,7 @@ static struct index_node*
 dtor (struct tnt_object* _o, struct index_node* _n, void* _arg __attribute__((unused)))
 {
 	_n->obj     = _o;
-	_n->key.ptr = mc_object (_o)->data;
+	_n->key.ptr = mc_o_get (_o)->data;
 
 	return _n;
 }
@@ -909,9 +909,9 @@ apply:(struct tbuf*)_op tag:(u16)_tag
 		case MC_ADD_OR_REPLACE:
 		{
 			struct MC_Object* m = (struct MC_Object*)_op->ptr;
-			say_debug ("%s, ADD_OR_REPLACE %s", __PRETTY_FUNCTION__, mc_key (m));
+			say_debug ("%s, ADD_OR_REPLACE %s", __PRETTY_FUNCTION__, mc_o_key (m));
 
-			onlyAddOrReplace (self, mc_key (m), m->exptime, m->flags, m->vlen, mc_value (m), m->cas);
+			onlyAddOrReplace (self, mc_o_key (m), m->exptime, m->flags, m->vlen, mc_o_val (m), m->cas);
 			break;
 		}
 
@@ -1012,8 +1012,8 @@ snapshot_write_rows: (XLog*)_log
 	[mc_index iterator_init];
 	for (int i = 1; (o = [mc_index iterator_next]); ++i)
 	{
-		struct MC_Object* m = mc_object (o);
-		if ([_log append_row:m len:mc_len (m) scn:snap_scn tag:MC_ADD_OR_REPLACE|TAG_SNAP] == NULL)
+		struct MC_Object* m = mc_o_get (o);
+		if ([_log append_row:m len:mc_o_len (m) scn:snap_scn tag:MC_ADD_OR_REPLACE|TAG_SNAP] == NULL)
 			return -1;
 
 		if (i%100000 == 0)
@@ -1121,7 +1121,7 @@ cas (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
 	struct tnt_object* o = [_memc->mc_index find:key];
 	if (mc_missing (o))
 		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_FOUND\r\n");
-	else if (mc_object (o)->cas != _params->value)
+	else if (mc_o_get (o)->cas != _params->value)
 		ADD_IOV_LITERAL (_params->noreply, _wbuf, "EXISTS\r\n");
 	else
 		addOrReplaceKey (_memc, key, _params, _wbuf);
@@ -1139,18 +1139,18 @@ append (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, 
 	}
 	else
 	{
-		struct MC_Object* m = mc_object (o);
+		struct MC_Object* m = mc_o_get (o);
 		struct tbuf*   b = tbuf_alloc (fiber->pool);
 
 		if (_back)
 		{
-			tbuf_append (b, mc_value (m), m->vlen);
+			tbuf_append (b, mc_o_val (m), m->vlen);
 			tbuf_append (b, _params->data, _params->bytes);
 		}
 		else
 		{
 			tbuf_append (b, _params->data, _params->bytes);
-			tbuf_append (b, mc_value (m), m->vlen);
+			tbuf_append (b, mc_o_val (m), m->vlen);
 		}
 
 		_params->bytes += m->vlen;
@@ -1172,13 +1172,13 @@ inc (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, int
 	}
 	else
 	{
-		struct MC_Object* m = mc_object (o);
+		struct MC_Object* m = mc_o_get (o);
 
-		if (is_numeric (mc_value (m), m->vlen))
+		if (is_numeric (mc_o_val (m), m->vlen))
 		{
 			++g_mc_stats.cmd_set;
 
-			u64 value = natoq (mc_value (m), mc_value (m) + m->vlen);
+			u64 value = natoq (mc_o_val (m), mc_o_val (m) + m->vlen);
 
 			if (_sign > 0)
 			{
@@ -1254,9 +1254,9 @@ get (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, boo
 
 		++g_mc_stats.get_hits;
 
-		struct MC_Object* m = mc_object (o);
-		const char* suffix = mc_suffix (m);
-		const char* value  = mc_value (m);
+		struct MC_Object* m = mc_o_get (o);
+		const char* suffix = mc_o_sfx (m);
+		const char* value  = mc_o_val (m);
 
 		if (_show_cas)
 		{
