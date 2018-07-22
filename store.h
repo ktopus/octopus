@@ -99,7 +99,7 @@ struct mc_params
  * Используем макроопределение ради вычисления размера выводимой строки на этапе
  * компиляции (соответственно работает только для константных строк)
  */
-#define ADD_IOV_LITERAL(_noreply, _wbuf, _s) \
+#define MEMCACHED_ADD_IOV_LITERAL(_noreply, _wbuf, _s) \
 	({ \
 		if (!(_noreply)) \
 			net_add_iov ((_wbuf), (_s), sizeof (_s) - 1); \
@@ -108,72 +108,72 @@ struct mc_params
 /**
  * @brief Преобразование строки в беззнаковое 64-битовое целое
  */
-u64 natoq (const char* _start, const char* _end);
+u64 memcached_natoq (const char* _start, const char* _end);
 
 /**
  * @brief Конструктор набора параметров команды
  */
-void init (struct mc_params* _params);
+void memcached_paramInit (struct mc_params* _params);
 
 /**
  * @brief Вывести сообщение об ошибке протокола
  */
-void protoError (struct mc_params* _params, struct netmsg_head* _wbuf);
+void memcached_protoError (struct mc_params* _params, struct netmsg_head* _wbuf);
 
 /**
  * @brief Добавить к статистике количество прочитанных байт
  */
-void statsAddRead (u64 _bytes);
+void memcached_statsAddRead (u64 _bytes);
 
 /**
  * @brief Реализация команды SET протокола memcached
  */
-void set (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
+void memcached_set (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
 
 /**
  * @brief Реализация команды ADD протокола memcached
  */
-void add (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
+void memcached_add (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
 
 /**
  * @brief Реализация команды REPLACE протокола memcached
  */
-void replace (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
+void memcached_replace (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
 
 /**
  * @brief Реализация команды CAS протокола memcached
  */
-void cas (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
+void memcached_cas (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
 
 /**
  * @brief Реализация команд APPEND и PREPEND протокола memcached
  */
-void append (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, bool _back);
+void memcached_append (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, bool _back);
 
 /**
  * @brief Реализация команд INCR и DECR протокола memcached
  */
-void inc (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, int _sign);
+void memcached_inc (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, int _sign);
 
 /**
  * @brief Реализация команды DELETE протокола memcached
  */
-void eraseKey (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
+void memcached_delete (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
 
 /**
  * @brief Реализация команд GETS и GET протокола memcached
  */
-void get (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, bool _show_cas);
+void memcached_get (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, bool _show_cas);
 
 /**
  * @brief Реализация команды FLUSH_ALL протокола memcached
  */
-void flushAll (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
+void memcached_flushAll (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
 
 /**
  * @brief Реализация команды STATS протокола memcached
  */
-void printStats (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
+void memcached_stats (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
 
 /**
  * @brief Парсер и диспетчер команд

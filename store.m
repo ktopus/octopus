@@ -192,7 +192,7 @@ mc_o_val (const struct MC_Object* _m)
  * @brief Время жизни значения
  */
 static inline bool
-mc_expired (struct tnt_object* _o)
+mc_o_expired (struct tnt_object* _o)
 {
 	if (cfg.memcached_no_expire)
 		return false;
@@ -206,9 +206,9 @@ mc_expired (struct tnt_object* _o)
  * @brief Невалидность значения
  */
 static inline bool
-mc_missing (struct tnt_object* _o)
+mc_o_missing (struct tnt_object* _o)
 {
-	return (_o == NULL) || object_ghost (_o) || mc_expired (_o);
+	return (_o == NULL) || object_ghost (_o) || mc_o_expired (_o);
 }
 
 /**
@@ -247,7 +247,7 @@ mc_o_new (const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _va
  * @brief Проверка, является ли заданная строка беззнаковым целым числом
  */
 static bool
-is_numeric (const char* _field, u32 _flen)
+memcached_is_numeric (const char* _field, u32 _flen)
 {
 	for (int i = 0; i < _flen; ++i)
 	{
@@ -266,7 +266,7 @@ is_numeric (const char* _field, u32 _flen)
  * параметр @a _k, так и память, на которую он указывает
  */
 static char*
-next_key (char** _k)
+memcached_next_key (char** _k)
 {
 	char* r = *_k;
 	char* p;
@@ -311,7 +311,7 @@ next_key (char** _k)
  * Используется при восстановлении данных из журнала и/или снапшота
  */
 static void
-onlyErase (Memcached* _memc, const char* _key)
+memcached_onlyErase (Memcached* _memc, const char* _key)
 {
 	struct tnt_object* o = [_memc->mc_index find:_key];
 	if (o)
@@ -327,7 +327,7 @@ onlyErase (Memcached* _memc, const char* _key)
  * Используется при восстановлении данных из журнала и/или снапшота
  */
 static void
-onlyAddOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _value, u64 _cas)
+memcached_onlyAddOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _value, u64 _cas)
 {
 	struct tnt_object* o = mc_o_new (_key, _exptime, _flags, _vlen, _value, _cas);
 	object_incr_ref (o);
@@ -342,7 +342,7 @@ onlyAddOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, 
 	//
 	// Удаляем из кэша объект с таким же ключём
 	//
-	onlyErase (_memc, _key);
+	memcached_onlyErase (_memc, _key);
 
 	//
 	// Добавляем объект в кэш
@@ -357,7 +357,7 @@ onlyAddOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, 
  * сохраннных старой версией сервера
  */
 static void
-onlyEraseCompat (Memcached* _memc, struct tbuf* _op)
+memcached_onlyEraseCompat (Memcached* _memc, struct tbuf* _op)
 {
 	int klen = read_varint32 (_op);
 
@@ -372,7 +372,7 @@ onlyEraseCompat (Memcached* _memc, struct tbuf* _op)
 	memcpy (key, _op->ptr, klen);
 	key[klen] = '\0';
 
-	onlyErase (_memc, key);
+	memcached_onlyErase (_memc, key);
 
 	free (key);
 }
@@ -384,7 +384,7 @@ onlyEraseCompat (Memcached* _memc, struct tbuf* _op)
  * сохраннных старой версией сервера
  */
 static void
-onlyAddOrReplaceCompat (Memcached* _memc, struct tbuf* _op)
+memcached_onlyAddOrReplaceCompat (Memcached* _memc, struct tbuf* _op)
 {
 	int   klen = read_varint32 (_op);
 	char* key  = read_bytes (_op, klen);
@@ -402,7 +402,7 @@ onlyAddOrReplaceCompat (Memcached* _memc, struct tbuf* _op)
 	int   vlen  = read_varint32 (_op);
 	char* value = read_bytes (_op, vlen);
 
-	onlyAddOrReplace (_memc, key, exptime, flags, vlen, value, cas);
+	memcached_onlyAddOrReplace (_memc, key, exptime, flags, vlen, value, cas);
 }
 
 /**
@@ -410,7 +410,7 @@ onlyAddOrReplaceCompat (Memcached* _memc, struct tbuf* _op)
  *        с блокировками объектов от параллельной модификации
  */
 static int
-addOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _value)
+memcached_addOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 _vlen, const char* _value)
 {
 	if ([_memc->shard is_replica])
 		return 0;
@@ -500,7 +500,7 @@ addOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u32 _flags, u32 
  *        с блокировками объектов от параллельной модификации
  */
 static int
-erase (Memcached* _memc, const char* _keys[], int _n)
+memcached_erase (Memcached* _memc, const char* _keys[], int _n)
 {
 	//
 	// Из реплики ничего не удаляем
@@ -603,7 +603,7 @@ erase (Memcached* _memc, const char* _keys[], int _n)
  * @brief Добавить или обновить объект в кэше с проверкой размера данных и выводом сообщения
  */
 static void
-addOrReplaceKey (Memcached* _memc, const char* _key, struct mc_params* _params, struct netmsg_head* _wbuf)
+memcached_addOrReplaceCommon (Memcached* _memc, const char* _key, struct mc_params* _params, struct netmsg_head* _wbuf)
 {
 	++g_mc_stats.cmd_set;
 
@@ -617,24 +617,24 @@ addOrReplaceKey (Memcached* _memc, const char* _key, struct mc_params* _params, 
 	if (_params->bytes > (1 << 20))
 	{
 		say_debug ("%s, object too large %u", __PRETTY_FUNCTION__, _params->bytes);
-		ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR object too large for cache\r\n");
+		MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR object too large for cache\r\n");
 		return;
 	}
 
-	if (addOrReplace (_memc, _key, _params->exptime, _params->flags, _params->bytes, _params->data) > 0)
+	if (memcached_addOrReplace (_memc, _key, _params->exptime, _params->flags, _params->bytes, _params->data) > 0)
 	{
 		g_mc_stats.total_items++;
 
-		ADD_IOV_LITERAL (_params->noreply, _wbuf, "STORED\r\n");
+		MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "STORED\r\n");
 	}
 	else
 	{
-		ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR\r\n");
+		MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR\r\n");
 	}
 }
 
 static void
-flush_all (va_list _ap)
+memcached_fiberFlushAll (va_list _ap)
 {
 	Memcached* memc = va_arg (_ap, Memcached*);
 
@@ -646,7 +646,7 @@ flush_all (va_list _ap)
 	for (u32 i = 0; i < slots; ++i)
 	{
 		struct tnt_object* obj = [memc->mc_index get:i];
-		if (obj != NULL)
+		if (obj)
 			mc_o_get (obj)->exptime = 1;
 	}
 }
@@ -687,7 +687,7 @@ memcached_expire (va_list _ap __attribute__((unused)))
 			if ((o == NULL) || object_ghost (o))
 				continue;
 
-			if (!mc_expired (o))
+			if (!mc_o_expired (o))
 				continue;
 
 			struct MC_Object* m = mc_o_get (o);
@@ -697,7 +697,7 @@ memcached_expire (va_list _ap __attribute__((unused)))
 			++k;
 		}
 
-		erase (memc, (const char**)keys, k);
+		memcached_erase (memc, (const char**)keys, k);
 		say_debug ("%s, expired %i keys", __PRETTY_FUNCTION__, k);
 
 		fiber_gc ();
@@ -707,7 +707,7 @@ memcached_expire (va_list _ap __attribute__((unused)))
 }
 
 static void
-mc_print_row (struct tbuf* _out, u16 _tag, struct tbuf* _op)
+memcached_printRow (struct tbuf* _out, u16 _tag, struct tbuf* _op)
 {
 	switch(_tag & TAG_MASK)
 	{
@@ -822,7 +822,7 @@ memcached_accept (int _fd, void* _data)
 }
 
 static void
-init_second_stage (va_list _ap __attribute__((unused)))
+memcached_init2stage (va_list _ap __attribute__((unused)))
 {
 	assert (recovery != NULL);
 	[recovery simple:NULL];
@@ -859,19 +859,19 @@ memcached_init ()
 	//
 	// fiber is required to successfully pull from remote
 	//
-	fiber_create ("memcached_init", init_second_stage);
+	fiber_create ("memcached_init", memcached_init2stage);
 }
 
 static int
 memcached_cat (const char* _filename)
 {
-	read_log (_filename, mc_print_row);
+	read_log (_filename, memcached_printRow);
 
 	return 0; /* ignore return status of read_log */
 }
 
 static struct index_node*
-dtor (struct tnt_object* _o, struct index_node* _n, void* _arg __attribute__((unused)))
+memcached_dtor (struct tnt_object* _o, struct index_node* _n, void* _arg __attribute__((unused)))
 {
 	_n->obj     = _o;
 	_n->key.ptr = mc_o_get (_o)->data;
@@ -885,7 +885,7 @@ init
 {
 	[super init];
 	mc_index = [[CStringHash alloc] init:NULL dtor:NULL];
-	mc_index->dtor = dtor;
+	mc_index->dtor = memcached_dtor;
 
 	return self;
 }
@@ -911,7 +911,7 @@ apply:(struct tbuf*)_op tag:(u16)_tag
 			struct MC_Object* m = (struct MC_Object*)_op->ptr;
 			say_debug ("%s, ADD_OR_REPLACE %s", __PRETTY_FUNCTION__, mc_o_key (m));
 
-			onlyAddOrReplace (self, mc_o_key (m), m->exptime, m->flags, m->vlen, mc_o_val (m), m->cas);
+			memcached_onlyAddOrReplace (self, mc_o_key (m), m->exptime, m->flags, m->vlen, mc_o_val (m), m->cas);
 			break;
 		}
 
@@ -921,7 +921,7 @@ apply:(struct tbuf*)_op tag:(u16)_tag
 				const char* key = (const char*)_op->ptr;
 				say_debug ("%s, ERASE %s", __PRETTY_FUNCTION__, key);
 
-				onlyErase (self, key);
+				memcached_onlyErase (self, key);
 				tbuf_ltrim (_op, strlen (key) + 1);
 			}
 			break;
@@ -943,7 +943,7 @@ apply:(struct tbuf*)_op tag:(u16)_tag
 					read_u32 (_op); /* flags */
 					read_u32 (_op); /* cardinality */
 
-					onlyAddOrReplaceCompat (self, _op);
+					memcached_onlyAddOrReplaceCompat (self, _op);
 					break;
 				}
 
@@ -953,7 +953,7 @@ apply:(struct tbuf*)_op tag:(u16)_tag
 
 					read_u32 (_op); /* key cardinality */
 
-					onlyEraseCompat (self, _op);
+					memcached_onlyEraseCompat (self, _op);
 					break;
 				}
 
@@ -973,7 +973,7 @@ apply:(struct tbuf*)_op tag:(u16)_tag
 			read_u32 (_op); /* cardinality */
 			read_u32 (_op); /* data_size */
 
-			onlyAddOrReplaceCompat (self, _op);
+			memcached_onlyAddOrReplaceCompat (self, _op);
 			break;
 
 		default:
@@ -1039,12 +1039,12 @@ snapshot_estimate
 - (void)
 print:(const struct row_v12*)_row into:(struct tbuf*)_buf
 {
-	print_row (_buf, _row, mc_print_row);
+	print_row (_buf, _row, memcached_printRow);
 }
 @end
 
 u64
-natoq (const char* _start, const char* _end)
+memcached_natoq (const char* _start, const char* _end)
 {
 	u64 num = 0;
 	while (_start < _end)
@@ -1053,7 +1053,7 @@ natoq (const char* _start, const char* _end)
 }
 
 void
-init (struct mc_params* _params)
+memcached_paramInit (struct mc_params* _params)
 {
 	assert (_params != NULL);
 
@@ -1068,74 +1068,74 @@ init (struct mc_params* _params)
 }
 
 void
-protoError (struct mc_params* _params, struct netmsg_head* _wbuf)
+memcached_protoError (struct mc_params* _params, struct netmsg_head* _wbuf)
 {
 	say_warn ("%s, memcached proto error", __PRETTY_FUNCTION__);
-	ADD_IOV_LITERAL (_params->noreply, _wbuf, "ERROR\r\n");
+	MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "ERROR\r\n");
 	g_mc_stats.bytes_written += 7;
 }
 
 void
-statsAddRead (u64 _bytes)
+memcached_statsAddRead (u64 _bytes)
 {
 	g_mc_stats.bytes_read += _bytes;
 }
 
 void
-set (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
+memcached_set (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
 {
-	const char* key = next_key (&_params->keys);
+	const char* key = memcached_next_key (&_params->keys);
 
-	addOrReplaceKey (_memc, key, _params, _wbuf);
+	memcached_addOrReplaceCommon (_memc, key, _params, _wbuf);
 }
 
 void
-add (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
+memcached_add (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
 {
-	const char* key = next_key (&_params->keys);
+	const char* key = memcached_next_key (&_params->keys);
 
 	struct tnt_object* o = [_memc->mc_index find:key];
-	if (!mc_missing (o))
-		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_STORED\r\n");
+	if (!mc_o_missing (o))
+		MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_STORED\r\n");
 	else
-		addOrReplaceKey (_memc, key, _params, _wbuf);
+		memcached_addOrReplaceCommon (_memc, key, _params, _wbuf);
 }
 
 void
-replace (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
+memcached_replace (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
 {
-	const char* key = next_key (&_params->keys);
+	const char* key = memcached_next_key (&_params->keys);
 
 	struct tnt_object* o = [_memc->mc_index find:key];
-	if (mc_missing (o))
-		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_STORED\r\n");
+	if (mc_o_missing (o))
+		MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_STORED\r\n");
 	else
-		addOrReplaceKey (_memc, key, _params, _wbuf);
+		memcached_addOrReplaceCommon (_memc, key, _params, _wbuf);
 }
 
 void
-cas (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
+memcached_cas (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
 {
-	const char* key = next_key (&_params->keys);
+	const char* key = memcached_next_key (&_params->keys);
 
 	struct tnt_object* o = [_memc->mc_index find:key];
-	if (mc_missing (o))
-		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_FOUND\r\n");
+	if (mc_o_missing (o))
+		MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_FOUND\r\n");
 	else if (mc_o_get (o)->cas != _params->value)
-		ADD_IOV_LITERAL (_params->noreply, _wbuf, "EXISTS\r\n");
+		MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "EXISTS\r\n");
 	else
-		addOrReplaceKey (_memc, key, _params, _wbuf);
+		memcached_addOrReplaceCommon (_memc, key, _params, _wbuf);
 }
 
 void
-append (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, bool _back)
+memcached_append (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, bool _back)
 {
-	char* key = next_key (&_params->keys);
+	char* key = memcached_next_key (&_params->keys);
 
 	struct tnt_object* o = [_memc->mc_index find:key];
-	if (mc_missing (o))
+	if (mc_o_missing (o))
 	{
-		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_STORED\r\n");
+		MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_STORED\r\n");
 	}
 	else
 	{
@@ -1156,29 +1156,29 @@ append (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, 
 		_params->bytes += m->vlen;
 		_params->data   = (char*)b->ptr;
 
-		addOrReplaceKey (_memc, key, _params, _wbuf);
+		memcached_addOrReplaceCommon (_memc, key, _params, _wbuf);
 	}
 }
 
 void
-inc (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, int _sign)
+memcached_inc (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, int _sign)
 {
-	const char* key = next_key (&_params->keys);
+	const char* key = memcached_next_key (&_params->keys);
 
 	struct tnt_object* o = [_memc->mc_index find:key];
-	if (mc_missing (o))
+	if (mc_o_missing (o))
 	{
-		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_FOUND\r\n");
+		MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_FOUND\r\n");
 	}
 	else
 	{
 		struct MC_Object* m = mc_o_get (o);
 
-		if (is_numeric (mc_o_val (m), m->vlen))
+		if (memcached_is_numeric (mc_o_val (m), m->vlen))
 		{
 			++g_mc_stats.cmd_set;
 
-			u64 value = natoq (mc_o_val (m), mc_o_val (m) + m->vlen);
+			u64 value = memcached_natoq (mc_o_val (m), mc_o_val (m) + m->vlen);
 
 			if (_sign > 0)
 			{
@@ -1195,58 +1195,58 @@ inc (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, int
 			struct tbuf* b = tbuf_alloc (fiber->pool);
 			tbuf_printf (b, "%"PRIu64, value);
 
-			if (addOrReplace (_memc, key, m->exptime, m->flags, tbuf_len(b), b->ptr))
+			if (memcached_addOrReplace (_memc, key, m->exptime, m->flags, tbuf_len(b), b->ptr))
 			{
 				++g_mc_stats.total_items;
 
 				if (!_params->noreply)
 				{
 					net_add_iov (_wbuf, b->ptr, tbuf_len (b));
-					ADD_IOV_LITERAL (_params->noreply, _wbuf, "\r\n");
+					MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "\r\n");
 				}
 			}
 			else
 			{
-				ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR\r\n");
+				MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR\r\n");
 			}
 		}
 		else
 		{
-			ADD_IOV_LITERAL (_params->noreply, _wbuf, "CLIENT_ERROR cannot increment or decrement non-numeric value\r\n");
+			MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "CLIENT_ERROR cannot increment or decrement non-numeric value\r\n");
 		}
 	}
 }
 
 void
-eraseKey (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
+memcached_delete (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
 {
-	const char* key = next_key (&_params->keys);
+	const char* key = memcached_next_key (&_params->keys);
 
 	struct tnt_object* o = [_memc->mc_index find:key];
-	if (mc_missing (o))
+	if (mc_o_missing (o))
 	{
-		ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_FOUND\r\n");
+		MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "NOT_FOUND\r\n");
 	}
 	else
 	{
-		if (erase (_memc, &key, 1) > 0)
-			ADD_IOV_LITERAL (_params->noreply, _wbuf, "DELETED\r\n");
+		if (memcached_erase (_memc, &key, 1) > 0)
+			MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "DELETED\r\n");
 		else
-			ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR\r\n");
+			MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "SERVER_ERROR\r\n");
 	}
 }
 
 void
-get (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, bool _show_cas)
+memcached_get (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, bool _show_cas)
 {
 	++g_mc_stats.cmd_get;
 
 	const char* key;
-	while ((key = next_key (&_params->keys)))
+	while ((key = memcached_next_key (&_params->keys)))
 	{
 		struct tnt_object* o = [_memc->mc_index find:key];
 
-		if (mc_missing (o))
+		if (mc_o_missing (o))
 		{
 			++g_mc_stats.get_misses;
 			continue;
@@ -1267,31 +1267,31 @@ get (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, boo
 		}
 		else
 		{
-			ADD_IOV_LITERAL (_params->noreply, _wbuf, "VALUE ");
+			MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "VALUE ");
 			net_add_iov (_wbuf, key, m->klen - 1);
 			net_add_iov (_wbuf, suffix, m->slen);
 		}
 
 		net_add_obj_iov (_wbuf, o, value, m->vlen);
-		ADD_IOV_LITERAL (_params->noreply, _wbuf, "\r\n");
+		MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "\r\n");
 
 		g_mc_stats.bytes_written += m->vlen + 2;
 	}
 
-	ADD_IOV_LITERAL (_params->noreply, _wbuf, "END\r\n");
+	MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "END\r\n");
 
 	g_mc_stats.bytes_written += 5;
 }
 
 void
-flushAll (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
+memcached_flushAll (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
 {
-	fiber_create ("flush_all", flush_all, _memc, _params->delay);
-	ADD_IOV_LITERAL (_params->noreply, _wbuf, "OK\r\n");
+	fiber_create ("flush_all", memcached_fiberFlushAll, _memc, _params->delay);
+	MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "OK\r\n");
 }
 
 void
-printStats (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
+memcached_stats (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf)
 {
 	(void)_memc;
 	(void)_params;

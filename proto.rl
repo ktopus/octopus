@@ -41,7 +41,7 @@
  * указатель на него
  */
 static const char *
-quote (const char* _p, int _len)
+memcached_quote (const char* _p, int _len)
 {
 	static char buf[40*2 + 3 + 1]; /* 40*2 + '...' + \0 */
 
@@ -118,9 +118,9 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 	// Параметры выполняемой команды
 	//
 	struct mc_params params;
-	init (&params);
+	memcached_paramInit (&params);
 
-	say_debug ("%s, %s'", __PRETTY_FUNCTION__, quote (p, (int)(pe - p)));
+	say_debug ("%s, %s'", __PRETTY_FUNCTION__, memcached_quote (p, (int)(pe - p)));
 
 	%%{
 		action kmark
@@ -171,7 +171,7 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 
 		action exptime
 		{
-			params.exptime = natoq (mark, p);
+			params.exptime = memcached_natoq (mark, p);
 			if ((params.exptime > 0) && (params.exptime <= 60*60*24*30))
 				params.exptime = params.exptime + ev_now ();
 		}
@@ -213,7 +213,7 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 			//
 			if (strncmp ((char *)(p + params.bytes), "\r\n", 2) != 0)
 			{
-				protoError (&params, _wbuf);
+				memcached_protoError (&params, _wbuf);
 				return -1;
 			}
 
@@ -230,7 +230,7 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 
 		action done
 		{
-			statsAddRead (p - (char*)_rbuf->ptr);
+			memcached_statsAddRead (p - (char*)_rbuf->ptr);
 			tbuf_ltrim (_rbuf, p - (char*)_rbuf->ptr);
 
 			done = true;
@@ -240,28 +240,28 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 		key       = printable >kmark;
 		keys      = printable >ksmark;
 		exptime   = digit+ >{ mark = p; } %exptime;
-		flags     = digit+ >{ mark = p; } %{ params.flags = natoq (mark, p); };
-		bytes     = digit+ >{ mark = p; } %{ params.bytes = natoq (mark, p); };
-		value     = digit+ >{ mark = p; } %{ params.value = natoq (mark, p); };
-		delay     = digit+ >{ mark = p; } %{ params.delay = natoq (mark, p); };
+		flags     = digit+ >{ mark = p; } %{ params.flags = memcached_natoq (mark, p); };
+		bytes     = digit+ >{ mark = p; } %{ params.bytes = memcached_natoq (mark, p); };
+		value     = digit+ >{ mark = p; } %{ params.value = memcached_natoq (mark, p); };
+		delay     = digit+ >{ mark = p; } %{ params.delay = memcached_natoq (mark, p); };
 		eol       = "\r\n" @{ ++p; };
 		spc       = " "+;
 		noreply   = (spc "noreply"i %{ params.noreply = true; })?;
 		store     = spc key spc flags spc exptime spc bytes noreply eol;
 
-		set       = "set"i store @read @done @{ set (_memc, &params, _wbuf); };
-		add       = "add"i store @read @done @{ add (_memc, &params, _wbuf); };
-		replace   = "replace"i store @read @done @{ replace (_memc, &params, _wbuf); };
-		append    = "append"i store @read @done @{ append (_memc, &params, _wbuf, true); };
-		prepend   = "prepend"i store @read @done @{ append (_memc, &params, _wbuf, false); };
-		cas       = "cas"i spc key spc flags spc exptime spc bytes spc value noreply spc? eol @read @done @{ cas (_memc, &params, _wbuf); };
-		gets      = "gets"i spc keys spc? eol @done @{ get (_memc, &params, _wbuf, true); };
-		get       = "get"i spc keys spc? eol @done @{ get (_memc, &params, _wbuf, false); };
-		del       = "delete"i spc key (spc exptime)? noreply spc? eol @done @{ eraseKey (_memc, &params, _wbuf); };
-		incr      = "incr"i spc key spc value noreply spc? eol @done @{ inc (_memc, &params, _wbuf,  1); };
-		decr      = "decr"i spc key spc value noreply spc? eol @done @{ inc (_memc, &params, _wbuf, -1); };
-		stats     = "stats"i eol @done @{ printStats (_memc, &params, _wbuf); };
-		flush_all = "flush_all"i (spc delay)? noreply spc? eol @done @{ flushAll (_memc, &params, _wbuf); };
+		set       = "set"i store @read @done @{ memcached_set (_memc, &params, _wbuf); };
+		add       = "add"i store @read @done @{ memcached_add (_memc, &params, _wbuf); };
+		replace   = "replace"i store @read @done @{ memcached_replace (_memc, &params, _wbuf); };
+		append    = "append"i store @read @done @{ memcached_append (_memc, &params, _wbuf, true); };
+		prepend   = "prepend"i store @read @done @{ memcached_append (_memc, &params, _wbuf, false); };
+		cas       = "cas"i spc key spc flags spc exptime spc bytes spc value noreply spc? eol @read @done @{ memcached_cas (_memc, &params, _wbuf); };
+		gets      = "gets"i spc keys spc? eol @done @{ memcached_get (_memc, &params, _wbuf, true); };
+		get       = "get"i spc keys spc? eol @done @{ memcached_get (_memc, &params, _wbuf, false); };
+		del       = "delete"i spc key (spc exptime)? noreply spc? eol @done @{ memcached_delete (_memc, &params, _wbuf); };
+		incr      = "incr"i spc key spc value noreply spc? eol @done @{ memcached_inc (_memc, &params, _wbuf,  1); };
+		decr      = "decr"i spc key spc value noreply spc? eol @done @{ memcached_inc (_memc, &params, _wbuf, -1); };
+		stats     = "stats"i eol @done @{ memcached_stats (_memc, &params, _wbuf); };
+		flush_all = "flush_all"i (spc delay)? noreply spc? eol @done @{ memcached_flushAll (_memc, &params, _wbuf); };
 		quit      = "quit"i eol @done @{ return 0; };
 
 		main := set       |
@@ -285,10 +285,10 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 
 	if (!done)
 	{
-		say_debug ("%s, parse failed at: `%s'", __PRETTY_FUNCTION__, quote (p, (int)(pe - p)));
+		say_debug ("%s, parse failed at: `%s'", __PRETTY_FUNCTION__, memcached_quote (p, (int)(pe - p)));
 		if ((pe - p) > (1 << 20))
 		{
-			protoError (&params, _wbuf);
+			memcached_protoError (&params, _wbuf);
 			return -1;
 		}
 
@@ -300,7 +300,7 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 			while ((tbuf_len (_rbuf) >= 2) && (memcmp (_rbuf->ptr, "\r\n", 2) == 0))
 				tbuf_ltrim (_rbuf, 2);
 
-			ADD_IOV_LITERAL (params.noreply, _wbuf, "CLIENT_ERROR bad command line format\r\n");
+			MEMCACHED_ADD_IOV_LITERAL (params.noreply, _wbuf, "CLIENT_ERROR bad command line format\r\n");
 			return 1;
 		}
 
