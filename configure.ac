@@ -215,6 +215,8 @@ AC_MSG_RESULT($ac_cv__builtin_expect)
 
 AC_CC_FLAG_CHECK([-Werror], [WCFLAGS="-Werror $WCFLAGS"])
 AC_CC_FLAG_CHECK([-Wno-sign-compare], [WCFLAGS="-Wno-sign-compare $WCFLAGS"])
+AC_CC_FLAG_CHECK([-Wno-implicit-fallthrough], [WCFLAGS="-Wno-implicit-fallthrough $WCFLAGS"])
+AC_CC_FLAG_CHECK([-Wno-tautological-compare], [WCFLAGS="-Wno-tautological-compare $WCFLAGS"])
 AC_CC_FLAG_CHECK([-Wextra], [WCFLAGS="-Wextra $WCFLAGS"])
 AC_SUBST(WCFLAGS)
 
