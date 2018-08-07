@@ -70,7 +70,7 @@ enum index_field_type {
 };
 struct index_field_desc {
 	u8 offset /* offset of key part in index_node,
-			 union index_field *key = &node->key + index_conf->field[i].offset */,
+		     union index_field *key = &node->key + index_conf->field[i].offset */,
 	   index /* of tuple field */;
 	char sort_order, type;
 };
@@ -87,12 +87,12 @@ static inline bool index_type_is_tree(enum index_type tp) {
 
 struct index_conf {
 	char min_tuple_cardinality /* minimum required tuple cardinality */,
-		 cardinality;
+	     cardinality;
 	char type;
 	bool unique;
 	char n;
 	char fill_order[8]; /* indexes of field[] ordered as they appear in tuple,
-				   used by sequential scan in box_tuple_gen_dtor */
+			       used by sequential scan in box_tuple_gen_dtor */
 	struct index_field_desc field[8]; /* key fields ordered as they appear in index */
 };
 void index_conf_validate(struct index_conf *d);
@@ -165,7 +165,7 @@ typedef struct tnt_object* tnt_ptr;
 	int (*eq)(const void *a, const void *b, void *);
 	int (*compare)(const void *a, const void *b, void *);
 	void (*init_pattern)(struct tbuf *key, int cardinality,
-				 struct index_node *pattern, void *);
+			     struct index_node *pattern, void *);
 
 	struct index_node node_a;
 	union index_field  __padding_a[7];
@@ -249,7 +249,7 @@ typedef void (*ixsort_on_duplicate)(void* arg, struct index_node* a, struct inde
 
 @interface SPTree: Tree {
 @public
-		struct sptree_t *tree;
+        struct sptree_t *tree;
 	struct sptree_iterator *iterator;
 }
 @end
@@ -362,11 +362,11 @@ lstr_load_prefix(union index_field *f, const u8* s, u32 len)
 	u32 p1 = 0;
 	u16 p2 = 0;
 	switch(len) {
-	case 6: p2 |= s[5]; __attribute__ ((fallthrough));
-	case 5: p2 |= (u16)s[4]<<8; __attribute__ ((fallthrough));
-	case 4: p1 |= s[3]; __attribute__ ((fallthrough));
-	case 3: p1 |= (u32)s[2]<<8; __attribute__ ((fallthrough));
-	case 2: p1 |= (u32)s[1]<<16; __attribute__ ((fallthrough));
+	case 6: p2 |= s[5];
+	case 5: p2 |= (u16)s[4]<<8;
+	case 4: p1 |= s[3];
+	case 3: p1 |= (u32)s[2]<<8;
+	case 2: p1 |= (u32)s[1]<<16;
 	case 1: p1 |= (u32)s[0]<<24;
 	}
 	f->str.prefix1 = p1;

@@ -32,8 +32,8 @@ obj-log-io += src/log_io_run_crc.o
 obj-log-io += src/paxos.o
 
 ifeq (1,$(HAVE_RAGEL))
-	dist-clean += src/admin.rl.m
-	dist += src/admin.rl.m
+	dist-clean += src/admin.m
+	dist += src/admin.m
 endif
 
 $(obj): XCFLAGS += -DOCTOPUS

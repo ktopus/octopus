@@ -217,7 +217,7 @@ iproto_mbox_send(struct iproto_mbox *mbox, struct iproto_egress *peer,
 
 int
 iproto_mbox_broadcast(struct iproto_mbox *mbox, struct iproto_egress_list *list,
-			  const struct iproto *msg, const struct iovec *iov, int iovcnt)
+		      const struct iproto *msg, const struct iovec *iov, int iovcnt)
 {
 	say_debug2("%s: op:0x%x", __func__, msg->msg_code);
 
@@ -356,7 +356,7 @@ iproto_future_err(struct iproto_future *future)
 		LIST_REMOVE(future, waiting_link);
 		io = future->ingress;
 		iproto_error(&io->wbuf, &future->proxy_request,
-				 ERR_CODE_BAD_CONNECTION, "proxy connection failed");
+			     ERR_CODE_BAD_CONNECTION, "proxy connection failed");
 		ev_io_start(&io->out);
 		slab_cache_free(&future_cache, future);
 		break;
@@ -443,8 +443,6 @@ iproto_future_resolve(struct iproto_egress *peer, struct iproto *msg)
 		break;
 	case IPROTO_FUTURE_ORPHAN:
 		say_debug3("orphan reply from peer:%s op:0x%x sync:%u", net_fd_name(peer->fd), msg->msg_code, msg->sync);
-		slab_cache_free(&future_cache, future);
-		break;
 	case IPROTO_FUTURE_BLACKHOLE:
 		slab_cache_free(&future_cache, future);
 		break;
@@ -490,7 +488,7 @@ iproto_remote_add_peer(struct iproto_egress *peer, const struct sockaddr_in *dad
 		SLIST_FOREACH(ts, &iproto_tac_list, link) {
 			peer = container_of(ts, struct iproto_egress, ts);
 			if (memcmp(&ts->daddr, daddr, sizeof(*daddr)) == 0 &&
-				peer->ctx == ctx)
+			    peer->ctx == ctx)
 				return peer;
 		}
 
