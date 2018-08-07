@@ -161,7 +161,6 @@ xlog_print(struct tbuf *out, u16 op, struct tbuf *b)
 
 	case DELETE:
 		flags = read_u32(b);
-		__attribute__ ((fallthrough));
 	case DELETE_1_3:
 		tbuf_printf(out, "%s n:%i ", box_ops[op], n);
 		key_cardinality = read_u32(b);
