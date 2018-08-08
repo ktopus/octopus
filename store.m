@@ -153,7 +153,7 @@ mc_o_get (struct tnt_object* _o)
 }
 
 /**
- * @brief Обшая длина объекта mc_obj вместе со всеми данными
+ * @brief Обшая длина объекта MC_Object вместе со всеми данными
  */
 static inline int
 mc_o_len (const struct MC_Object* _m)
@@ -214,7 +214,7 @@ mc_o_missing (struct tnt_object* _o)
 /**
  * @brief Упаковка параметров во вновь созданную структуру tnt_object{MC_Object}
  *
- * Объекты с распределением USE_GC должны освобождаться только с использованием
+ * Объекты с распределением MC_USE_GC должны освобождаться только с использованием
  * object_decr_ref
  */
 static struct tnt_object*
@@ -354,7 +354,7 @@ memcached_onlyAddOrReplace (Memcached* _memc, const char* _key, u32 _exptime, u3
  * @brief Восстановление данных из журнала и/или снапшота
  *
  * Используется при восстановлении данных из журнала и/или снапшота
- * сохраннных старой версией сервера
+ * сохранённых старой версией сервера
  */
 static void
 memcached_onlyEraseCompat (Memcached* _memc, struct tbuf* _op)
@@ -381,7 +381,7 @@ memcached_onlyEraseCompat (Memcached* _memc, struct tbuf* _op)
  * @brief Восстановление данных из журнала и/или снапшота
  *
  * Используется при восстановлении данных из журнала и/или снапшота
- * сохраннных старой версией сервера
+ * сохранённых старой версией сервера
  */
 static void
 memcached_onlyAddOrReplaceCompat (Memcached* _memc, struct tbuf* _op)
@@ -600,7 +600,8 @@ memcached_erase (Memcached* _memc, const char* _keys[], int _n)
 }
 
 /**
- * @brief Добавить или обновить объект в кэше с проверкой размера данных и выводом сообщения
+ * @brief Добавить или обновить объект в кэше с проверкой размера
+ *        данных и выводом сообщения
  */
 static void
 memcached_addOrReplaceCommon (Memcached* _memc, const char* _key, struct mc_params* _params, struct netmsg_head* _wbuf)
