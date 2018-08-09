@@ -238,7 +238,7 @@ enum BOX_SPACE_STAT {
 void object_space_fill_stat_names(struct object_space* space);
 void object_space_clear_stat_names(struct object_space* space);
 
-#define OBJECT_SPACE_MAX (256)
+#define OBJECT_SPACE_MAX (1024)
 @interface Box : DefaultExecutor <Executor> {
 @public
 	struct object_space *object_space_registry[OBJECT_SPACE_MAX];
