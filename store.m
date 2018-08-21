@@ -715,8 +715,8 @@ memcached_printRow (struct tbuf* _out, u16 _tag, struct tbuf* _op)
 		case MC_ADD_OR_REPLACE:
 		{
 			struct MC_Object* m = _op->ptr;
-			const char*    k = m->data;
-			tbuf_printf (_out, "ADD_OR_REPLACE %.*s %.*s", m->klen, k, m->vlen, mc_o_val (m));
+			const char*       k = m->data;
+			tbuf_printf (_out, "ADD_OR_REPLACE %.*s %.*s", ((int)m->klen), k, ((int)m->vlen), mc_o_val (m));
 			break;
 		}
 
