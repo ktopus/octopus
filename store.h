@@ -36,7 +36,7 @@
 /**
  * @brief Параметры команды
  */
-struct mc_params
+struct MC_Params
 {
 	/**
 	 * @brief Указатель на ключ или набор ключей
@@ -87,9 +87,9 @@ struct mc_params
 		Fiber* expire_fiber;
 
 	@public
-		Shard<Shard>* shard;
+		Shard<Shard>* m_shard;
 
-		CStringHash* mc_index;
+		CStringHash* m_index;
 	}
 @end
 
@@ -113,12 +113,12 @@ u64 memcached_natoq (const char* _start, const char* _end);
 /**
  * @brief Конструктор набора параметров команды
  */
-void memcached_paramInit (struct mc_params* _params);
+void memcached_paramInit (struct MC_Params* _params);
 
 /**
  * @brief Вывести сообщение об ошибке протокола
  */
-void memcached_protoError (struct mc_params* _params, struct netmsg_head* _wbuf);
+void memcached_protoError (struct MC_Params* _params, struct netmsg_head* _wbuf);
 
 /**
  * @brief Добавить к статистике количество прочитанных байт
@@ -128,52 +128,52 @@ void memcached_statsAddRead (u64 _bytes);
 /**
  * @brief Реализация команды SET протокола memcached
  */
-void memcached_set (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
+void memcached_set (Memcached* _memc, struct MC_Params* _params, struct netmsg_head* _wbuf);
 
 /**
  * @brief Реализация команды ADD протокола memcached
  */
-void memcached_add (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
+void memcached_add (Memcached* _memc, struct MC_Params* _params, struct netmsg_head* _wbuf);
 
 /**
  * @brief Реализация команды REPLACE протокола memcached
  */
-void memcached_replace (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
+void memcached_replace (Memcached* _memc, struct MC_Params* _params, struct netmsg_head* _wbuf);
 
 /**
  * @brief Реализация команды CAS протокола memcached
  */
-void memcached_cas (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
+void memcached_cas (Memcached* _memc, struct MC_Params* _params, struct netmsg_head* _wbuf);
 
 /**
  * @brief Реализация команд APPEND и PREPEND протокола memcached
  */
-void memcached_append (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, bool _back);
+void memcached_append (Memcached* _memc, struct MC_Params* _params, struct netmsg_head* _wbuf, bool _back);
 
 /**
  * @brief Реализация команд INCR и DECR протокола memcached
  */
-void memcached_inc (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, int _sign);
+void memcached_inc (Memcached* _memc, struct MC_Params* _params, struct netmsg_head* _wbuf, int _sign);
 
 /**
  * @brief Реализация команды DELETE протокола memcached
  */
-void memcached_delete (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
+void memcached_delete (Memcached* _memc, struct MC_Params* _params, struct netmsg_head* _wbuf);
 
 /**
  * @brief Реализация команд GETS и GET протокола memcached
  */
-void memcached_get (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf, bool _show_cas);
+void memcached_get (Memcached* _memc, struct MC_Params* _params, struct netmsg_head* _wbuf, bool _show_cas);
 
 /**
  * @brief Реализация команды FLUSH_ALL протокола memcached
  */
-void memcached_flushAll (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
+void memcached_flushAll (Memcached* _memc, struct MC_Params* _params, struct netmsg_head* _wbuf);
 
 /**
  * @brief Реализация команды STATS протокола memcached
  */
-void memcached_stats (Memcached* _memc, struct mc_params* _params, struct netmsg_head* _wbuf);
+void memcached_stats (Memcached* _memc, struct MC_Params* _params, struct netmsg_head* _wbuf);
 
 /**
  * @brief Парсер и диспетчер команд

@@ -15,3 +15,31 @@ primary_port = 11211
 # TODO: remove this dependency
 secondary_addr = ""
 secondary_port = 0
+
+object_space =
+[
+  {
+    enabled = -1, required
+    ignored = 0
+    wal = 1
+    snap = 1
+    cardinality = -1
+    estimated_rows = 0
+    index =
+    [
+      {
+        type = "", required
+        unique = -1, required
+        on_duplicate = NULL
+        key_field =
+        [
+          {
+            fieldno = -1, required
+            type = "", required
+            sort_order = "ASC"
+          }, ro,  required
+        ], required
+      }, ro
+    ], required
+  }, ro
+], rw

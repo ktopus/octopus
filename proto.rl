@@ -117,7 +117,7 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 	//
 	// Параметры выполняемой команды
 	//
-	struct mc_params params;
+	struct MC_Params params;
 	memcached_paramInit (&params);
 
 	say_debug ("%s, %s'", __PRETTY_FUNCTION__, memcached_quote (p, (int)(pe - p)));
@@ -180,7 +180,8 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 		{
 			//
 			// Размер уже разобранных данных (нужно для правильного восстановления
-			// указателей парсера после догрузки данных)
+			// указателей парсера после добавления данных в буфер и перераспределения
+			// памяти)
 			//
 			size_t parsed = p - (char*)_rbuf->ptr;
 
