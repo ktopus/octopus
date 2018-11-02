@@ -39,73 +39,82 @@
 #include <third_party/luajit/src/lualib.h>
 #include <third_party/luajit/src/lauxlib.h>
 
-
 struct tnt_object *
-object_alloc(u8 type, int gc, size_t size)
+object_alloc (u8 _type, int _gc, size_t _size)
 {
-	struct tnt_object *obj;
-	if (gc) {
-		struct gc_oct_object *gcobj = salloc(sizeof(struct gc_oct_object) + size);
-		if (gcobj == NULL)
-			goto err;
-		gcobj->refs = 0;
-		obj = &gcobj->obj;
-	} else {
-		obj = salloc(sizeof(struct tnt_object) + size);
-		if (obj == NULL)
-			goto err;
+	struct tnt_object* obj = NULL;
+
+	if (_gc > 0)
+	{
+		struct gc_oct_object* gco = salloc (sizeof (struct gc_oct_object) + _size);
+		if (gco == NULL)
+			iproto_raise (ERR_CODE_MEMORY_ISSUE, (salloc_error == ESALLOC_NOCACHE) ? "bad object size" : "can't allocate object");
+
+		gco->refs = 0;
+		obj = &gco->obj;
 	}
-	obj->type = type;
+	else
+	{
+		obj = salloc (sizeof (struct tnt_object) + _size);
+		if (obj == NULL)
+			iproto_raise (ERR_CODE_MEMORY_ISSUE, (salloc_error == ESALLOC_NOCACHE) ? "bad object size" : "can't allocate object");
+	}
+
+	obj->type  = _type;
 	obj->flags = 0;
 
-	say_debug3("object_alloc(%zu) = %p", size, obj);
+	say_debug3 ("%s (%zu) = %p", __func__, _size, obj);
 	return obj;
-err:
-	iproto_raise(ERR_CODE_MEMORY_ISSUE,
-		     salloc_error == ESALLOC_NOCACHE ?
-		     "bad object size": "can't allocate object");
-}
-
-
-void
-object_ref(struct tnt_object *obj, int count)
-{
-	struct gc_oct_object *gcobj = container_of(obj, struct gc_oct_object, obj);
-	assert(gcobj->refs + count >= 0);
-	gcobj->refs += count;
-
-	if (gcobj->refs == 0)
-		sfree(gcobj);
 }
 
 void
-object_incr_ref(struct tnt_object *obj)
+object_ref (struct tnt_object* _obj, int _count)
 {
-	assert(obj->type == 1);
-	struct gc_oct_object *gcobj = container_of(obj, struct gc_oct_object, obj);
-	assert(gcobj->refs + 1 > 0);
-	gcobj->refs++;
+	struct gc_oct_object* gco = container_of (_obj, struct gc_oct_object, obj);
+
+	assert ((gco->refs + _count) >= 0);
+
+	gco->refs += _count;
+	if (gco->refs == 0)
+		sfree (gco);
 }
 
 void
-object_incr_ref_autorelease(struct tnt_object *obj)
+object_incr_ref (struct tnt_object* _obj)
 {
-	struct gc_oct_object *gcobj = container_of(obj, struct gc_oct_object, obj);
-	assert(gcobj->refs + 1 > 0);
-	gcobj->refs++;
-	autorelease((id)((uintptr_t)obj | 1));
+	assert (_obj->type == 1);
+
+	struct gc_oct_object* gco = container_of (_obj, struct gc_oct_object, obj);
+
+	assert ((gco->refs + 1) > 0);
+
+	++gco->refs;
 }
 
 void
-object_decr_ref(struct tnt_object *obj)
+object_incr_ref_autorelease (struct tnt_object* _obj)
 {
-	struct gc_oct_object *gcobj = container_of(obj, struct gc_oct_object, obj);
-	assert(gcobj->refs - 1 >= 0);
-	gcobj->refs--;
+	struct gc_oct_object* gco = container_of (_obj, struct gc_oct_object, obj);
 
-	if (gcobj->refs == 0) {
-		say_debug3("object_decr_ref(%p) free", gcobj);
-		sfree(gcobj);
+	assert ((gco->refs + 1) > 0);
+
+	++gco->refs;
+
+	autorelease ((id)((uintptr_t)_obj | 1));
+}
+
+void
+object_decr_ref (struct tnt_object* _obj)
+{
+	struct gc_oct_object* gco = container_of (_obj, struct gc_oct_object, obj);
+
+	assert ((gco->refs - 1) >= 0);
+	--gco->refs;
+
+	if (gco->refs == 0)
+	{
+		say_debug3 ("%s (%p) free", __func__, gco);
+		sfree (gco);
 	}
 }
 

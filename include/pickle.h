@@ -111,7 +111,7 @@ u8 *save_varint32(u8 *target, u32 value);
 u32 _load_varint32(void **data);
 static inline u32 load_varint32(void **data)
 {
-	const u8* p = *data;
+	const u8* p = (const u8*)*data;
 	if ((*p & 0x80) == 0) {
 		(*data)++;
 		return *p;
@@ -120,39 +120,98 @@ static inline u32 load_varint32(void **data)
 	}
 }
 
-/* WARNING: this macro will decode BER intergers not larger than 2048383 */
-#define LOAD_VARINT32(ptr) ({				\
-	const unsigned char *p = (ptr);			\
-	int v = *p & 0x7f;				\
-	if (*p & 0x80) {				\
-		v = (v << 7) | (*++p & 0x7f);		\
-		if (*p & 0x80)				\
-			v = (v << 7) | (*++p & 0x7f);	\
-	}						\
-	ptr = (typeof(ptr))(p + 1);			\
-	v;						\
+/**
+ * @brief Декодирование целого числа не большего чем 2048383
+ *
+ * Для того, чтобы исключить конфликт по именам переменных все внутренние
+ * переменные этого макроопределения дополнены префиксом LOAD_VARINT32_
+ */
+#define LOAD_VARINT32(_p) ({                                                        \
+	const unsigned char* LOAD_VARINT32_p = (_p);                                    \
+	int LOAD_VARINT32_v = *LOAD_VARINT32_p & 0x7f;                                  \
+	if (*LOAD_VARINT32_p & 0x80)                                                    \
+	{                                                                               \
+		LOAD_VARINT32_v = (LOAD_VARINT32_v << 7) | (*++LOAD_VARINT32_p & 0x7f);     \
+		if (*LOAD_VARINT32_p & 0x80)                                                \
+			LOAD_VARINT32_v = (LOAD_VARINT32_v << 7) | (*++LOAD_VARINT32_p & 0x7f); \
+	}                                                                               \
+	_p = (__typeof__(_p))(LOAD_VARINT32_p + 1);                                     \
+	LOAD_VARINT32_v;                                                                \
 })
 
-struct tlv {
+/**
+ * @brief Tag/Len/Value структура для описания произвольных данных, упакованных в единый блок
+ */
+struct tlv
+{
+	/**
+	 * @brief Тэг, определяющий тип упакованных данных
+	 */
 	u16 tag;
+
+	/**
+	 * @brief Размер блока данных
+	 */
 	u32 len;
+
+	/**
+	 * @brief Начало блока данных
+	 */
 	u8 val[0];
 } __attribute((packed));
 
+/**
+ * @brief Добавить в буфер заголовок tlv-структуры с заданным тэгом
+ *
+ * Возвращается смещение в байтах в буфере, с которого начинается данный
+ * заголовок. Возвращаем смещение а не указатель, так как в процессе
+ * добавления данных в буфер память может перераспределяться и указатель
+ * может стать невалидным
+ */
 static inline int
-tlv_add(struct tbuf *buf, u16 tag)
+tlv_add (struct tbuf* _buf, u16 _tag)
 {
-	struct tlv tlv = { .tag = tag };
-	int offt = buf->end - buf->ptr;
-	tbuf_append(buf, &tlv, sizeof(tlv));
-	return offt;
+	//
+	// Заголовок tlv-структуры с заданным тэгом
+	//
+	struct tlv header = {.tag = _tag};
+
+	//
+	// Вычисляем смещение по текущему заполнению буфера
+	//
+	int off = (u8*)_buf->end - (u8*)_buf->ptr;
+
+	//
+	// Добавляем в буфер заголовок
+	//
+	tbuf_append (_buf, &header, sizeof (header));
+
+	//
+	// Возвращаем смещение
+	//
+	return off;
 }
 
+/**
+ * @brief Зафиксировать tlv-структуру в буфере
+ *
+ * В данной функции вычисляется реальный размер данных tlv-структуры и
+ * эта длина запоминается в соответствующем заголовке (идентифицируемом
+ * по его смещению в буфере)
+ */
 static inline void
-tlv_end(struct tbuf *buf, int offt)
+tlv_end (struct tbuf* _buf, int _off)
 {
-	struct tlv *tlv = buf->ptr + offt;
-	tlv->len = buf->end - buf->ptr - offt - sizeof(struct tlv);
+	//
+	// Указатель на заголовок
+	//
+	struct tlv* header = (struct tlv*)((u8*)_buf->ptr + _off);
+
+	//
+	// Размер данных tlv-структуры равен текущему размеру буфера минус
+	// смещение заголовка tlv-структуры и минус размер этого заголовка
+	//
+	header->len = (u8*)_buf->end - (u8*)_buf->ptr - _off - sizeof (*header);
 }
 
 #endif

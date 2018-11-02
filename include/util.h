@@ -111,7 +111,10 @@ const char* xstrdup(const char* str);
 #define field_sizeof(compound_type, field) sizeof(((compound_type *)NULL)->field)
 
 #ifndef offsetof
-#define offsetof(type, member) ((size_t) &((type *)0)->member)
+/**
+ * @brief Смещение заданного поля в структуре
+ */
+#define offsetof(_type, _member) ((size_t)&((_type*)0)->_member)
 #endif
 
 #ifndef __offsetof
@@ -121,10 +124,18 @@ const char* xstrdup(const char* str);
 #define nelem(x)     (sizeof((x))/sizeof((x)[0]))
 
 #ifndef container_of
-#define container_of(ptr, type, member) ({			\
-	const typeof( ((type *)0)->member ) *__mptr = (ptr);	\
-	(type *)( (char *)__mptr - offsetof(type, member) );	\
-})
+/**
+ * @brief Получить указатель на структуру по указателю на её поле
+ *
+ * @param[in] _p указатель на член структуры
+ * @param[in] _type тип структуры, на член которой указывает @a _p
+ * @param[in] _member имя члена структуры, на который указывает @a _p
+ *
+ * @return указатель на структуру, членом которой является @a _p
+ */
+#define container_of(_p, _type, _member) ({               \
+	const __typeof__(((_type*)0)->_member)* __mptr = (_p); \
+	(_type*)((char*)__mptr - offsetof (_type, _member));})
 #endif
 
 #ifndef TYPEALIGN

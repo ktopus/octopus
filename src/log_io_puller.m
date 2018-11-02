@@ -373,58 +373,72 @@ contains_full_row_v11(const struct tbuf *b)
 - (ssize_t)
 recv_with_timeout: (ev_tstamp)timeout
 {
-	ssize_t r = tbuf_recv(&rbuf, fd);
-	if (r >= 0)
+	ssize_t r = tbuf_recv (&rbuf, fd);
+	if ((r > 0) || (timeout == 0))
 		return r;
 
-	ev_io io = { .coro = 1 };
-	ev_io_init(&io, (void *)fiber, fd, EV_READ);
-	ev_io_start(&io);
+	ev_io io = {.coro = 1};
+	ev_io_init  (&io, (void*)fiber, fd, EV_READ);
+	ev_io_start (&io);
 
-	ev_now_update();
-	ev_timer timer = { .coro = 1 };
-	ev_timer_init(&timer, (void *)fiber, timeout, 0);
-	if (timeout > 0)
-		ev_timer_start(&timer);
+	ev_now_update ();
+	ev_timer timer = {.coro = 1};
+	ev_timer_init  (&timer, (void*)fiber, timeout, 0);
+	ev_timer_start (&timer);
 
 	in_recv = fiber;
-	void *w = yield();
+	void* w = yield ();
 	in_recv = NULL;
 
-	ev_io_stop(&io);
-	ev_timer_stop(&timer);
+	ev_timer_stop (&timer);
+	ev_io_stop    (&io);
 
-	if (unlikely(abort)) {
-		/* cause we could awake by io or timer */
-		fiber_cancel_wake(fiber);
+	if (unlikely (abort))
+	{
+		//
+		// Cause we could awake by io or timer
+		//
+		fiber_cancel_wake (fiber);
 		errno = 0;
 		return -3;
 	}
 
-	if (unlikely(w == &timer))
+	if (unlikely (w == &timer))
 		return -2;
 
-	if (w == &io)
-		return tbuf_recv(&rbuf, fd);
-
-	assert(false);
+	assert (w == &io);
+	return tbuf_recv (&rbuf, fd);
 }
 
 - (ssize_t)
 recv
 {
 	if (abort)
-		raise_fmt("recv aborted");
+		raise_fmt ("recv aborted");
 
-	tbuf_ensure(&rbuf, 256 * 1024);
+	tbuf_ensure (&rbuf, 256*1024);
+
 	ssize_t r = [self recv_with_timeout: cfg.wal_feeder_keepalive_timeout];
 
-	if (r <= 0) {
-		switch (r) {
-		case 0: raise_fmt("unexpected EOF");
-		case -2: raise_fmt("timeout");
-		case -3: raise_fmt("recv aborted");
-		default: raise_fmt("unknown error: %s", strerror_o(errno));
+	//
+	// FIXME: при задании здесь <= в тесте 40.2 сервер выходит с сообщением
+	//        "unexpected EOF"
+	//
+	if (r <= 0)
+	{
+		switch (r)
+		{
+			case 0:
+				raise_fmt ("unexpected EOF");
+
+			case -2:
+				raise_fmt ("timeout");
+
+			case -3:
+				raise_fmt ("recv aborted");
+
+			default:
+				raise_fmt ("unknown error: %s", strerror_o (errno));
 		}
 	}
 

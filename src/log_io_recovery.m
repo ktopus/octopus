@@ -96,42 +96,63 @@ peer_addr(const char *name, enum port_type port_type)
 }
 
 void
-update_rt(int shard_id, Shard<Shard> *shard, const char *master_name)
+update_rt (int _shard_id, Shard<Shard>* _shard, const char* _master_name)
 {
 	static struct msg_void_ptr msg;
-	// FIXME: do a broadcast after change local destinations
-	struct shard_route *route = &shard_rt[shard_id];
-	static struct netmsg_pool_ctx ctx = { .cfg = {.name = "proxy_pool"},
-					      .limit = 64 * 1024 };
 
-	const struct sockaddr_in *addr = NULL;
-	if (master_name && strcmp(master_name, "<dummy_addr>") != 0) {
-		addr = peer_addr(master_name, PORT_PRIMARY);
-		if (!addr) {
-			say_error("Unknown peer %s, ignoring shard %i route update", master_name, shard_id);
+	// FIXME: do a broadcast after change local destinations
+	struct shard_route* route = &shard_rt[_shard_id];
+
+	const struct sockaddr_in* addr = NULL;
+	if (_master_name && (strcmp (_master_name, "<dummy_addr>") != 0))
+	{
+		addr = peer_addr (_master_name, PORT_PRIMARY);
+
+		if (!addr)
+		{
+			say_error ("Unknown peer %s, ignoring shard %i route update", _master_name, _shard_id);
 			return;
 		}
 	}
 
-	route->shard = shard;
+	route->shard = _shard;
 	route->proxy = NULL;
 
-	if (master_name) {
-		if (!addr) {
-			assert(shard->dummy);
-			route->proxy = (void *)0x1; // FIXME: dummy struct;
+	if (_master_name)
+	{
+		if (!addr)
+		{
+			assert (_shard->dummy);
+			route->proxy = (void*)0x1; // FIXME: dummy struct;
+
 			goto exit;
 		}
-		route->proxy = iproto_remote_add_peer(NULL, addr, &ctx); // will check for existing connect
+
+		//
+		// FIXME: распределяем, но никогда не удаляем. Это замена статического
+		//        контекста, когда сервер падал на segfault из-за отсутствия пула
+		//        распределения памяти
+		//
+		static struct netmsg_pool_ctx* ctx = NULL;
+		if (!ctx)
+		{
+			ctx = malloc (sizeof (struct netmsg_pool_ctx));
+			netmsg_pool_ctx_init (ctx, "proxy_pool", 64*1024);
+		}
+
+		route->proxy = iproto_remote_add_peer (NULL, addr, ctx); // will check for existing connect
 	}
+
 exit:
-	if (shard == nil || shard->loading)
+	if ((_shard == nil) || _shard->loading)
 		return;
 
-	if (cfg.hostname && strcmp(shard->peer[0], cfg.hostname) == 0) {
-		shard_log("route update, force notify", shard_id);
+	if (cfg.hostname && (strcmp (_shard->peer[0], cfg.hostname) == 0))
+	{
+		shard_log ("route update, force notify", _shard_id);
+
 		if (msg.link.tqe_prev == NULL)
-			mbox_put(&recovery->rt_notify_mbox, &msg, link);
+			mbox_put (&recovery->rt_notify_mbox, &msg, link);
 	}
 }
 

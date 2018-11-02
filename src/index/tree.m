@@ -195,21 +195,56 @@ set_sorted_nodes:(void *)nodes_ count:(size_t)count
 - (bool)
 sort_nodes:(void *)nodes_ count:(size_t)count onduplicate:(ixsort_on_duplicate)ondup arg:(void*)arg
 {
-	int i;
+	//
+	// Сортируем узлы индекса
+	//
+	qsort_arg (nodes_, count, node_size, compare, dtor_arg);
+
+	//
+	// Ищем дубликаты начиная со второго узла (если узел один, то дубликатов
+	// нет по определению)
+	//
 	bool no_dups = true;
-	qsort_arg(nodes_, count, node_size, compare, dtor_arg);
-	for (i = 1; i < count; i++) {
-		struct index_node *node = nodes_ + i * node_size;
-		struct index_node *prev = nodes_ + (i-1) * node_size;
-		int cmp = compare(node, prev, dtor_arg);
-		assert(cmp >= 0);
-		if (conf.unique && cmp == 0) {
+	for (int i = 1; i < count; ++i)
+	{
+		//
+		// Поскольку узлы отсортированы, то дубликаты расположены строго подряд
+		//
+		struct index_node* node = nodes_ + i*node_size;
+		struct index_node* prev = nodes_ + (i - 1)*node_size;
+
+		//
+		// Сравниваем текущий и предыдущий узел
+		//
+		int cmp = compare (node, prev, dtor_arg);
+		//
+		// Поскольку узлы отсортированы в порядке возрастания, то предыдущий узел
+		// не может быть больше последующего
+		//
+		assert (cmp >= 0);
+
+		//
+		// Если для индекса задана уникальность записей и текущий узел является
+		// дубликатом предыдущего
+		//
+		if (conf.unique && (cmp == 0))
+		{
+			//
+			// В дереве есть дубликаты
+			//
 			no_dups = false;
-			if(ondup != NULL) {
-				ondup(arg, prev, node, i);
-			}
+
+			//
+			// Если задана функция реагирования на найденные дубликаты, то
+			// вызываем её, передавая ей параметры сортировки, а так же
+			// предыдущий, текущий дублирующиеся узлы индекса и позицию
+			// дубликата в массиве
+			//
+			if (ondup != NULL)
+				ondup (arg, prev, node, i);
 		}
 	}
+
 	return no_dups;
 }
 @end

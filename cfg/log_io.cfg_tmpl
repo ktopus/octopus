@@ -67,3 +67,6 @@ sync_scn_with_lsn = 1, ro
 
 # call fadvise_dont_need on snapshot writes
 snap_fadvise_dont_need = 1, rw
+
+# enable/disable octopus version output (need for auto tests)
+log_io_octopus_version = 1, ro
