@@ -23,9 +23,9 @@ Env.env_eval do
   puts "# wal_writer stop"
   Process.kill "STOP", wal_writer_pid
   t1 = Thread.new { log_try { c1.insert [1, "foo"] } }
-  t2 = Thread.new { sleep 0.01; log_try { c2.insert [1, "foobar"] } }
+  t2 = Thread.new { sleep 0.1; log_try { c2.insert [1, "foobar"] } }
 
-  sleep 0.05
+  sleep 0.5
   c4.select 1
 
   puts "# wal_writer cont"
@@ -41,8 +41,8 @@ Env.env_eval do
   puts "# wal_writer stop"
   Process.kill "STOP", wal_writer_pid
   t2 = Thread.new { log_try { c2.update_fields 3, [0, :set, 1] } }
-  t1 = Thread.new { sleep 0.01; log_try { c1.insert [1, "foo"] } }
-  sleep 0.05
+  t1 = Thread.new { sleep 0.1; log_try { c1.insert [1, "foo"] } }
+  sleep 0.5
   c4.select 1, 3
   Process.kill "CONT", wal_writer_pid
   puts "# wal_writer cont"
