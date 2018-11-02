@@ -61,8 +61,11 @@ user_proc = {}
 ffi.cdef[[
 struct object_space {
 	int n;
-	bool ignored, snap, wal;
+	bool ignored;
+	bool snap;
+	bool wal;
 	int cardinality;
+	int statbase;
 	size_t obj_bytes;
 	size_t slab_bytes;
 	const struct BasicIndex *index[10];

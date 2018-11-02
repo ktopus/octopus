@@ -23,7 +23,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
 #import <util.h>
 #import <say.h>
 #import <tbuf.h>
@@ -36,92 +35,231 @@
 
 #import <mod/box/box.h>
 
-static struct index_node *
-box_tuple_u32_dtor(struct tnt_object *obj, struct index_node *node, void *arg)
+/**
+ * @brief Конструктор узла индекса по заданному полю записи типа 32х битное целое
+ *
+ * @param _obj объект, который индексируется
+ * @param _node конструируемый узел индекса
+ * @param _arg номер поля записи, по которому выполняется индексирование
+ */
+static struct index_node*
+box_tuple_u32_dtor (struct tnt_object* _obj, struct index_node* _node, void* _arg)
 {
-	int n = (uintptr_t)arg;
-	u8 *f = tuple_field(obj, n);
-	if (f == NULL)
-		index_raise("cardinality too small");
-	if (*f != sizeof(u32))
-		index_raise("expected u32");
+	//
+	// Номер поля записи. Хранится в указателе
+	//
+	int n = (uintptr_t)_arg;
 
-	node->obj = obj;
-	node->key.u32 = *(u32*)(f + 1);
-	return node;
-}
-static struct index_node *
-box_tuple_u64_dtor(struct tnt_object *obj, struct index_node *node, void *arg)
-{
-	int n = (uintptr_t)arg;
-	const u8 *f = tuple_field(obj, n);
+	//
+	// Получаем указатель на индексируемое поле и проверяем его валидность
+	//
+	u8* f = tuple_field (_obj, n);
 	if (f == NULL)
-		index_raise("cardinality too small");
-	if (*f != sizeof(u64))
-		index_raise("expected u64");
+		index_raise ("cardinality too small");
+	if (*f != sizeof (u32))
+		index_raise ("expected u32");
 
-	node->obj = obj;
-	node->key.u64 = *(u64*)(f + 1);
-	return node;
+	//
+	// Проиндексированный объект
+	//
+	_node->obj = _obj;
+
+	//
+	// Устанавливаем данные индекса
+	//
+	_node->key.u32 = *(u32*)(f + 1);
+
+	return _node;
 }
-static struct index_node *
-box_tuple_lstr_dtor(struct tnt_object *obj, struct index_node *node, void  *arg)
+
+/**
+ * @brief Конструктор узла индекса по заданному полю записи типа 64х битное целое
+ *
+ * @param _obj объект, который индексируется
+ * @param _node конструируемый узел индекса
+ * @param _arg номер поля записи, по которому выполняется индексирование
+ */
+static struct index_node*
+box_tuple_u64_dtor (struct tnt_object* _obj, struct index_node* _node, void* _arg)
 {
-	int n = (uintptr_t)arg;
-	const u8 *f = tuple_field(obj, n);
+	//
+	// Номер поля записи. Хранится в указателе
+	//
+	int n = (uintptr_t)_arg;
+
+	//
+	// Получаем указатель на индексируемое поле и проверяем его валидность
+	//
+	u8* f = tuple_field (_obj, n);
 	if (f == NULL)
-		index_raise("cardinality too small");
-	size_t size = LOAD_VARINT32(f);
+		index_raise ("cardinality too small");
+	if (*f != sizeof (u64))
+		index_raise ("expected u64");
+
+	//
+	// Проиндексированный объект
+	//
+	_node->obj = _obj;
+
+	//
+	// Устанавливаем данные индекса
+	//
+	_node->key.u64 = *(u64*)(f + 1);
+
+	return _node;
+}
+
+/**
+ * @brief Конструктор узла индекса по заданному полю записи типа строка
+ *
+ * @param _obj объект, который индексируется
+ * @param _node конструируемый узел индекса
+ * @param _arg номер поля записи, по которому выполняется индексирование
+ */
+static struct index_node*
+box_tuple_lstr_dtor (struct tnt_object* _obj, struct index_node* _node, void* _arg)
+{
+	//
+	// Номер поля записи. Хранится в указателе
+	//
+	int n = (uintptr_t)_arg;
+
+	//
+	// Получаем указатель на индексируемое поле и проверяем его валидность
+	//
+	u8* f = tuple_field (_obj, n);
+	if (f == NULL)
+		index_raise ("cardinality too small");
+	size_t size = LOAD_VARINT32 (f);
 	if (size > 0xffff)
-		index_raise("string key too long");
-	node->obj = obj;
-	set_lstr_field(&node->key, size, f);
-	return node;
+		index_raise ("string key too long");
+
+	//
+	// Проиндексированный объект
+	//
+	_node->obj = _obj;
+
+	//
+	// Устанавливаем данные индекса
+	//
+	set_lstr_field (&_node->key, size, f);
+
+	return _node;
 }
-static struct index_node *
-box_tuple_gen_dtor(struct tnt_object *obj, struct index_node *node, void *arg)
+
+/**
+ * @brief Конструктор узла индекса по общему описанию
+ *
+ * @param _obj объект, который индексируется
+ * @param _node конструируемый узел индекса
+ * @param _arg общее описание индекса
+ */
+static struct index_node*
+box_tuple_gen_dtor (struct tnt_object* _obj, struct index_node* _node, void* _arg)
 {
-	const struct index_conf *desc = arg;
+	//
+	// Общее описание индекса
+	//
+	struct index_conf* desc = (struct index_conf*)_arg;
 
-	node->obj = obj;
+	//
+	// Проиндексированный объект
+	//
+	_node->obj = _obj;
 
-	if (desc->cardinality == 1) {
-		const u8 *f = tuple_field(obj, desc->field[0].index);
+	//
+	// Если проиндексировано одно поле
+	//
+	if (desc->cardinality == 1)
+	{
+		//
+		// Получаем указатель на индексируемое поле и проверяем его валидность
+		//
+		u8* f = tuple_field (_obj, desc->field[0].index);
 		if (f == NULL)
-			index_raise("cardinality too small");
-		u32 len = LOAD_VARINT32(f);
-		gen_set_field(&node->key, desc->field[0].type, len, f);
-		return node;
+			index_raise ("cardinality too small");
+
+		//
+		// Получаем размер индексируемого поля и переходим к данным поля
+		//
+		u32 len = LOAD_VARINT32 (f);
+
+		//
+		// Устанавливаем данные индекса
+		//
+		gen_set_field (&_node->key, desc->field[0].type, len, f);
+
+		return _node;
 	}
 
-	if (tuple_cardinality(obj) < desc->min_tuple_cardinality)
-		index_raise("cardinality too small");
+	//
+	// Если количество полей записи меньше минимального количества
+	// полей записи для индексации
+	//
+	if (tuple_cardinality (_obj) < desc->min_tuple_cardinality)
+		index_raise ("cardinality too small");
 
-	int i = 0, j = 0;
-	int indi = desc->fill_order[i];
-	const struct index_field_desc *field = &desc->field[indi];
-	const u8 *data = tuple_data(obj);
+	//
+	// Данные записи
+	//
+	u8* data = tuple_data (_obj);
 
-	for (;;j++) {
-		u32 len = LOAD_VARINT32(data);
-		if (field->index == j) {
-			union index_field *f = (void *)&node->key + field->offset;
-			gen_set_field(f, field->type, len, data);
-			if (++i == desc->cardinality)
-				goto end;
-			indi = desc->fill_order[i];
-			field = &desc->field[indi];
+	//
+	// Проходим по всем полям записи пока не будут записаны в узел все
+	// индексируемые поля
+	//
+	// Для построения сложного индекса используется специальный маппинг,
+	// который позволяет построить описание узла индекса при последовательном
+	// проходе полей записи. Это сделано для ускорения построения узла индекса,
+	// так как поля в индексе могут быть указаны не в том порядке, в котором
+	// они встречаются в записи
+	//
+	for (int i = 0, j = 0; (i < desc->cardinality) && (j < tuple_cardinality (_obj)); ++j)
+	{
+		//
+		// Получаем размер поля и переходим к началу собственно данных поля
+		//
+		u32 len = LOAD_VARINT32 (data);
+
+		//
+		// Описание индексируемого поля
+		//
+		struct index_field_desc* field = &desc->field[(int)desc->fill_order[i]];
+
+		//
+		// Если найдено поле, включённое в индекс
+		//
+		//
+		if (j == field->index)
+		{
+			//
+			// Заполняем данные узла индекса
+			//
+			gen_set_field ((void*)&_node->key + field->offset, field->type, len, data);
+
+			//
+			// Переходим к описанию следующего индексируемого поля
+			//
+			++i;
 		}
+
+		//
+		// Переходим к следующему полю записи
+		//
 		data += len;
 	}
-end:
-	return (struct index_node *)node;
+
+	return (struct index_node*)_node;
 }
 
-struct dtor_conf box_tuple_dtor = {
-	.u32 = box_tuple_u32_dtor,
-	.u64 = box_tuple_u64_dtor,
-	.lstr = box_tuple_lstr_dtor,
+/**
+ * @brief Генераторы узлов индекса для записей mod/box
+ */
+struct dtor_conf box_tuple_dtor =
+{
+	.u32     = box_tuple_u32_dtor,
+	.u64     = box_tuple_u64_dtor,
+	.lstr    = box_tuple_lstr_dtor,
 	.generic = box_tuple_gen_dtor
 };
 

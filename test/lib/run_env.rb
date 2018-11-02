@@ -82,6 +82,7 @@ class RunEnv < TinyRakeEmbed
 pid_file = "octopus.pid"
 slab_alloc_arena = 0.1
 log_level = 7
+log_io_octopus_version = 0
 primary_port = #@primary_port
 admin_port = #@admin_port
 wal_fsync_delay = 0.1
