@@ -11,6 +11,8 @@ obj += src-lua/onlineconf.o
 
 src/octopus.o src/net_io.o src/fiber.o: XCFLAGS += -DOCT_OBJECT
 
+obj += mod/box/common.o
+obj += mod/box/tuple.o
 obj += mod/box/box.o
 obj += mod/box/op.o
 obj += mod/box/meta_op.o

@@ -23,399 +23,672 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
 #import <util.h>
 #import <tbuf.h>
 #import <log_io.h>
 #import <pickle.h>
 #import <fiber.h>
 #import <say.h>
+
+#import <mod/box/common.h>
+#import <mod/box/op.h>
 #import <mod/box/box.h>
+#import <mod/box/print.h>
 
 #include <sysexits.h>
 
+/**
+ * @brief Таблица для печати записей
+ *
+ * По умолчанию выводятся все таблицы
+ */
 static int snap_space = -1;
+
+/**
+ * @brief Формат по умочанию
+ */
+static const char* fmt_ini = "@";
+
+/**
+ * @brief Вспомогательная переменная для анализа формата
+ */
+static const char* fmt;
+
+/**
+ * @brief Проверка необходимости экранирования символа при печати
+ */
 static int
-quote(int c)
+quote (int _c)
 {
-	return !(0x20 <= c && c < 0x7f && !(c == '"' || c == '\\'));
+	return !((0x20 <= _c) && (_c < 0x7f) && !((_c == '"') || (_c == '\\')));
 }
 
-const char *fmt_ini ="@", *fmt;
-
-
+/**
+ * @brief Вывести в буфер заданное поле {длина, значение} в соответствии
+ *        с форматом
+ */
 static void
-field_print(struct tbuf *buf, void *f, bool sep)
+field_print (struct tbuf* _b, void* _f, bool _sep)
 {
-	uint32_t size;
+	//
+	// Размер поля для вывода с одновременной перемоткой
+	// указателя поля на его данные
+	//
+	uint32_t size = LOAD_VARINT32 (_f);
 
-	size = LOAD_VARINT32(f);
-
+	//
+	// Символ формата
+	//
 	char c = *fmt;
-	if (*(fmt + 1))
-		fmt++;
+	//
+	// Если строка формата не полностью обработана, то сдвигаемся к
+	// следующему символу, иначе последний символ формата будет работать
+	// для всех выводимых далее полей
+	//
+	if (*(fmt + 1) != '\0')
+		++fmt;
 
+	//
+	// Если в качестве формата печати поля задан пробел, то данное поле не выводим
+	//
 	if (c == ' ')
 		return;
-	if (sep)
-		tbuf_append_lit(buf, ", ");
 
-	switch (c) {
-	case 'i':
-		switch(size) {
-		case 1: tbuf_puti(buf, *(i8 *)f); break;
-		case 2: tbuf_puti(buf, *(i16 *)f); break;
-		case 4: tbuf_puti(buf, *(i32 *)f); break;
-		case 8: tbuf_putl(buf, *(i64 *)f); break;
-		default: tbuf_printf(buf, "<invalid int size>");
-		};
-		break;
-	case 'u':
-		switch(size) {
-		case 1: tbuf_putu(buf, *(u8 *)f); break;
-		case 2: tbuf_putu(buf, *(u16 *)f); break;
-		case 4: tbuf_putu(buf, *(u32 *)f); break;
-		case 8: tbuf_putul(buf, *(u64 *)f); break;
-		default: tbuf_printf(buf, "<invalid int size>");
-		};
-		break;
-	case 's':
-		tbuf_putc(buf, '"');
-		while (size-- > 0) {
-			if (quote(*(u8 *)f)) {
-				tbuf_append_lit(buf, "\\x");
-				tbuf_putx(buf, *(char *)f++);
-			} else
-				tbuf_putc(buf, *(char *)f++);
-		}
-		tbuf_putc(buf, '"');
-		break;
-	case 'x':
-		tbuf_putxs(buf, f, size);
-		break;
-	case '@':
-		if (size == 2) {
-			tbuf_putu(buf, *(u16*)f);
-			tbuf_putc(buf, ':');
-		} else if (size == 4) {
-			tbuf_putu(buf, *(u32*)f);
-			tbuf_putc(buf, ':');
-		}
-		tbuf_putc(buf, '"');
-		while (size-- > 0) {
-			if (quote(*(u8 *)f)) {
-				tbuf_append_lit(buf, "\\x");
-				tbuf_putx(buf, *(char *)f++);
-			} else
-				tbuf_putc(buf, *(char *)f++);
-		}
-		tbuf_putc(buf, '"');
-		break;
-	default:
-		tbuf_printf(buf, "<invalid fmt>");
+	//
+	// Выводим разделитель если задано
+	//
+	if (_sep)
+		tbuf_append_lit (_b, ", ");
+
+	//
+	// В зависимости от формата вывода поля
+	//
+	switch (c)
+	{
+		//
+		// Вывод целого со знаком
+		//
+		case 'i':
+			//
+			// В зависимости от битности числа
+			//
+			switch (size)
+			{
+				case 1: // 8 бит
+					tbuf_puti (_b, *(i8*)_f);
+					break;
+
+				case 2: // 16 бит
+					tbuf_puti (_b, *(i16*)_f);
+					break;
+
+				case 4: // 32 бита
+					tbuf_puti (_b, *(i32*)_f);
+					break;
+
+				case 8: // 64 бита
+					tbuf_putl (_b, *(i64*)_f);
+					break;
+
+				default:
+					tbuf_printf (_b, "<invalid int size>");
+					break;
+			};
+			break;
+
+		//
+		// Вывод целого без знака
+		//
+		case 'u':
+			//
+			// В зависимости от битности числа
+			//
+			switch (size)
+			{
+				case 1: // 8 бит
+					tbuf_putu (_b, *(u8*)_f);
+					break;
+
+				case 2: // 16 бит
+					tbuf_putu (_b, *(u16*)_f);
+					break;
+
+				case 4: // 32 бита
+					tbuf_putu (_b, *(u32*)_f);
+					break;
+
+				case 8: // 64 бита
+					tbuf_putul (_b, *(u64*)_f);
+					break;
+
+				default:
+					tbuf_printf (_b, "<invalid int size>");
+					break;
+			};
+			break;
+
+		//
+		// Вывод строки с экранированием символов
+		//
+		case 's':
+			tbuf_putc (_b, '"');
+			while (size-- > 0)
+			{
+				if (quote (*(u8*)_f))
+				{
+					tbuf_append_lit (_b, "\\x");
+					tbuf_putx (_b, *(char*)_f++);
+				}
+				else
+				{
+					tbuf_putc (_b, *(char*)_f++);
+				}
+			}
+			tbuf_putc (_b, '"');
+			break;
+
+		//
+		// Вывод данных в шестнадцатеричном представлении
+		//
+		case 'x':
+			tbuf_putxs (_b, _f, size);
+			break;
+
+		//
+		// Вывод беззнакового 16 или 32 разрядного целого в формате:
+		//    <значение числа>:<память под значение в виде строки с экранированием символов>
+		//
+		// Поля других размеров выводятся как текст с экранированием символов
+		//
+		case '@':
+			if (size == 2)
+			{
+				tbuf_putu (_b, *(u16*)_f);
+				tbuf_putc (_b, ':');
+			}
+			else if (size == 4)
+			{
+				tbuf_putu (_b, *(u32*)_f);
+				tbuf_putc (_b, ':');
+			}
+
+			tbuf_putc (_b, '"');
+			while (size-- > 0)
+			{
+				if (quote (*(u8*)_f))
+				{
+					tbuf_append_lit (_b, "\\x");
+					tbuf_putx (_b, *(char*)_f++);
+				}
+				else
+				{
+					tbuf_putc (_b, *(char*)_f++);
+				}
+			}
+			tbuf_putc (_b, '"');
+			break;
+
+		default:
+			tbuf_printf (_b, "<invalid format symbol '%c'>", (int)c);
+			break;
 	}
 }
 
-void
-tuple_data_print(struct tbuf *buf, u32 cardinality, void *f)
+/**
+ * @brief Вывод полей записи в буфер в соответствии с форматом
+ *
+ * @param[out] _b буфер для вывода
+ * @param[in]  _c количество полей
+ * @param[in]  _f указатель на первое поле
+ */
+static void
+tuple_data_print (struct tbuf* _b, u32 _c, void* _f)
 {
 	fmt = fmt_ini;
-	for (size_t i = 0; i < cardinality; i++, f = next_field(f))
-		field_print(buf, f, i > 0);
+	for (size_t i = 0; i < _c; ++i, _f = next_field (_f))
+		field_print (_b, _f, i > 0);
 }
 
 void
-tuple_print(struct tbuf *buf, u32 cardinality, void *f)
+tuple_print (struct tbuf* _b, u32 _c, void* _f)
 {
-	tbuf_putc(buf, '<');
-	tuple_data_print(buf, cardinality, f);
-	tbuf_putc(buf, '>');
+	tbuf_putc (_b, '<');
+	tuple_data_print (_b, _c, _f);
+	tbuf_putc (_b, '>');
 }
 
+/**
+ * @brief Печать в буфер записи из xlog
+ */
 static void
-xlog_print(struct tbuf *out, u16 op, struct tbuf *b)
+xlog_print (struct tbuf* _out, u16 _op, struct tbuf* _b)
 {
-	u32 n, key_cardinality, key_bsize;
-	void *key;
-	u32 cardinality, field_no;
+	//
+	// Флаги операции. Вынесены отдельно для того, чтобы можно было
+	// использовать в операциях DELETE, DELETE_1_3
+	//
 	u32 flags = 0;
-	u32 op_cnt;
-	struct index_conf ic = { .n = 0 };
 
-	n = read_u32(b);
+	//
+	// Код таблицы
+	//
+	u32 n = read_u32 (_b);
 
-	switch (op) {
-	case INSERT:
-		tbuf_printf(out, "%s n:%i ", box_ops[op], n);
-		flags = read_u32(b);
-		cardinality = read_u32(b);
-		u32 data_len = tbuf_len(b);
-		void *data = read_bytes(b, data_len);
+	switch (_op)
+	{
+		case INSERT:
+		{
+			tbuf_printf (_out, "%s n:%i ", box_op_name (_op), n);
 
-		tbuf_printf(out, "flags:%08X ", flags);
-		if (fields_bsize(cardinality, data, data_len) == data_len)
-			tuple_print(out, cardinality, data);
-		else
-			tbuf_printf(out, "<CORRUPT TUPLE>");
-		break;
+			flags           = read_u32(_b);
+			u32 cardinality = read_u32(_b);
+			u32 data_len    = tbuf_len(_b);
+			void* data      = read_bytes (_b, data_len);
 
-	case DELETE:
-		flags = read_u32(b);
-	case DELETE_1_3:
-		tbuf_printf(out, "%s n:%i ", box_ops[op], n);
-		key_cardinality = read_u32(b);
-		key_bsize = tbuf_len(b);
-		key = read_bytes(b, key_bsize);
-
-		if (fields_bsize(key_cardinality, key, key_bsize) != key_bsize) {
-			tbuf_printf(out, "<CORRUPT KEY>");
+			tbuf_printf (_out, "flags:%08X ", flags);
+			if (fields_bsize (cardinality, data, data_len) == data_len)
+				tuple_print (_out, cardinality, data);
+			else
+				tbuf_printf (_out, "<CORRUPT TUPLE>");
 			break;
 		}
 
-		if (op == DELETE)
-			tbuf_printf(out, "flags:%08X ", flags);
-		tuple_print(out, key_cardinality, key);
-		break;
+		case DELETE:
+			flags = read_u32 (_b);
+		case DELETE_1_3:
+		{
+			tbuf_printf (_out, "%s n:%i ", box_op_name (_op), n);
 
-	case UPDATE_FIELDS:
-		tbuf_printf(out, "%s n:%i ", box_ops[op], n);
-		flags = read_u32(b);
-		key_cardinality = read_u32(b);
-		key_bsize = fields_bsize(key_cardinality, b->ptr, tbuf_len(b));
-		key = read_bytes(b, key_bsize);
+			u32 key_cardinality = read_u32 (_b);
+			u32 key_bsize       = tbuf_len (_b);
+			void* key           = read_bytes (_b, key_bsize);
 
-		op_cnt = read_u32(b);
-
-		tbuf_printf(out, "flags:%08X ", flags);
-		tuple_print(out, key_cardinality, key);
-
-		while (op_cnt-- > 0) {
-			field_no = read_u32(b);
-			u8 op = read_u8(b);
-			void *arg = read_field(b);
-
-			tbuf_printf(out, " [field_no:%i op:", field_no);
-			switch (op) {
-			case 0:
-				tbuf_printf(out, "set ");
+			if (fields_bsize (key_cardinality, key, key_bsize) != key_bsize)
+			{
+				tbuf_printf(_out, "<CORRUPT KEY>");
 				break;
-			case 1:
-				tbuf_printf(out, "add ");
-				break;
-			case 2:
-				tbuf_printf(out, "and ");
-				break;
-			case 3:
-				tbuf_printf(out, "xor ");
-				break;
-			case 4:
-				tbuf_printf(out, "or ");
-				break;
-			case 5:
-				tbuf_printf(out, "splice ");
-				break;
-			case 6:
-				tbuf_printf(out, "delete ");
-				break;
-			case 7:
-				tbuf_printf(out, "insert ");
-				break;
-			default:
-				tbuf_printf(out, "CORRUPT_OP:%i", op);
 			}
-			tuple_print(out, 1, arg);
-			tbuf_printf(out, "] ");
+
+			if (_op == DELETE)
+				tbuf_printf (_out, "flags:%08X ", flags);
+			tuple_print (_out, key_cardinality, key);
+			break;
 		}
-		break;
 
-	case NOP:
-		tbuf_printf(out, "NOP");
-		break;
+		case UPDATE_FIELDS:
+		{
+			tbuf_printf (_out, "%s n:%i ", box_op_name (_op), n);
 
-	case CREATE_OBJECT_SPACE:
-		tbuf_printf(out, "%s n:%i ", box_ops[op], n);
-		flags = read_u32(b);
-		tbuf_printf(out, "flags:%08X ", flags);
-		tbuf_printf(out, "cardinalty:%i ", read_i8(b));
-		index_conf_read(b, &ic);
-		tbuf_printf(out, "PK: ");
-		index_conf_print(out, &ic);
-		break;
-	case CREATE_INDEX:
-		tbuf_printf(out, "%s n:%i ", box_ops[op], n);
-		flags = read_u32(b);
-		tbuf_printf(out, "flags:%08X ", flags);
-		ic.n = read_i8(b);
-		index_conf_read(b, &ic);
-		index_conf_print(out, &ic);
-		break;
-	case DROP_OBJECT_SPACE:
-		tbuf_printf(out, "%s n:%i ", box_ops[op], n);
-		flags = read_u32(b);
-		tbuf_printf(out, "flags:%08X ", flags);
-		break;
-	case DROP_INDEX:
-		tbuf_printf(out, "%s n:%i ", box_ops[op], n);
-		flags = read_u32(b);
-		tbuf_printf(out, "flags:%08X ", flags);
-		tbuf_printf(out, "index:%i", read_i8(b));
-		break;
-	case TRUNCATE:
-		tbuf_printf(out, "%s n:%i ", box_ops[op], n);
-		flags = read_u32(b);
-		break;
-	default:
-		tbuf_printf(out, "unknown wal op %" PRIi32, op);
-	}
+			flags               = read_u32 (_b);
+			u32 key_cardinality = read_u32 (_b);
+			u32 key_bsize       = fields_bsize (key_cardinality, _b->ptr, tbuf_len (_b));
+			void* key           = read_bytes (_b, key_bsize);
+			u32 op_cnt          = read_u32 (_b);
 
-	if (tbuf_len(b) > 0)
-		tbuf_printf(out, ", %i bytes unparsed %s", tbuf_len(b), tbuf_to_hex(b));
-}
+			tbuf_printf (_out, "flags:%08X ", flags);
+			tuple_print (_out, key_cardinality, key);
 
-static void
-snap_print(struct tbuf *out, struct tbuf *row)
-{
-	struct box_snap_row *snap = box_snap_row(row);
+			while (op_cnt-- > 0)
+			{
+				u32 field_no = read_u32 (_b);
+				u8 op        = read_u8 (_b);
+				void* arg    = read_field (_b);
 
-	if (snap_space == -1) {
-		tbuf_printf(out, "n:%i ", snap->object_space);
-		tuple_print(out, snap->tuple_size, snap->data);
-	} else if (snap_space == snap->object_space) {
-		tuple_data_print(out, snap->tuple_size, snap->data);
-	}
-}
+				tbuf_printf (_out, " [field_no:%i op:", field_no);
+				switch (op)
+				{
+					case 0:
+						tbuf_printf (_out, "set ");
+						break;
 
-static void
-tlv_print(struct tbuf *out, struct tlv *tlv)
-{
-	switch (tlv->tag) {
-	case BOX_MULTI_OP: {
-		void *ptr = tlv->val;
-		int len = tlv->len;
-		tbuf_printf(out, "BOX_MULTY { ");
-		while (len) {
-			struct tlv *nested = ptr;
-			ptr += sizeof(*nested) + nested->len;
-			len -= sizeof(*nested) + nested->len;
-			tlv_print(out, nested);
-			tbuf_printf(out, "; ");
+					case 1:
+						tbuf_printf (_out, "add ");
+						break;
+
+					case 2:
+						tbuf_printf (_out, "and ");
+						break;
+
+					case 3:
+						tbuf_printf (_out, "xor ");
+						break;
+
+					case 4:
+						tbuf_printf (_out, "or ");
+						break;
+
+					case 5:
+						tbuf_printf (_out, "splice ");
+						break;
+
+					case 6:
+						tbuf_printf (_out, "delete ");
+						break;
+
+					case 7:
+						tbuf_printf (_out, "insert ");
+						break;
+
+					default:
+						tbuf_printf (_out, "CORRUPT_OP:%i", op);
+						break;
+				}
+				tuple_print (_out, 1, arg);
+				tbuf_printf (_out, "] ");
+			}
+			break;
 		}
-		tbuf_printf(out, " }");
-		break;
+
+		case NOP:
+			tbuf_printf (_out, "NOP");
+			break;
+
+		case CREATE_OBJECT_SPACE:
+		{
+			tbuf_printf (_out, "%s n:%i ", box_op_name (_op), n);
+
+			struct index_conf ic = {.n = 0};
+
+			flags           = read_u32 (_b);
+			u32 cardinality = read_i8 (_b);
+			index_conf_read (_b, &ic);
+
+			tbuf_printf (_out, "flags:%08X ", flags);
+			tbuf_printf (_out, "cardinalty:%i ", cardinality);
+			tbuf_printf (_out, "PK: ");
+			index_conf_print (_out, &ic);
+			break;
+		}
+
+		case CREATE_INDEX:
+		{
+			tbuf_printf (_out, "%s n:%i ", box_op_name (_op), n);
+
+			struct index_conf ic = {.n = 0};
+
+			flags = read_u32 (_b);
+			ic.n  = read_i8 (_b);
+			index_conf_read (_b, &ic);
+
+			tbuf_printf (_out, "flags:%08X ", flags);
+			index_conf_print (_out, &ic);
+			break;
+		}
+
+		case DROP_OBJECT_SPACE:
+			tbuf_printf (_out, "%s n:%i ", box_op_name (_op), n);
+
+			flags = read_u32 (_b);
+			tbuf_printf (_out, "flags:%08X ", flags);
+			break;
+
+		case DROP_INDEX:
+			tbuf_printf (_out, "%s n:%i ", box_op_name (_op), n);
+
+			flags   = read_u32 (_b);
+			u32 idx = read_i8 (_b);
+
+			tbuf_printf (_out, "flags:%08X ", flags);
+			tbuf_printf (_out, "index:%i", idx);
+			break;
+
+		case TRUNCATE:
+			tbuf_printf (_out, "%s n:%i ", box_op_name (_op), n);
+
+			flags = read_u32(_b);
+			break;
+
+		default:
+			tbuf_printf (_out, "unknown wal op %" PRIi32, _op);
 	}
-	case BOX_OP:
-		xlog_print(out, *(u16 *)tlv->val,
-			   &TBUF(tlv->val + 2, tlv->len - 2, NULL));
-		break;
-	default:
-		tbuf_printf(out, "unknown tlv %i", tlv->tag);
-		break;
+
+	//
+	// Если в буфере остались данные, то выводим их в шестнадцатеричном представлении
+	//
+	if (tbuf_len (_b) > 0)
+		tbuf_printf (_out, ", %i bytes unparsed %s", tbuf_len (_b), tbuf_to_hex (_b));
+}
+
+/**
+ * @brief Вывод в буфер строки снапшота
+ */
+static void
+snap_print (struct tbuf* _out, struct tbuf* _row)
+{
+	struct box_snap_row* snap = box_snap_row (_row);
+
+	if (snap_space == -1)
+	{
+		tbuf_printf (_out, "n:%i ", snap->object_space);
+		tuple_print (_out, snap->tuple_size, snap->data);
+	}
+	else if (snap_space == snap->object_space)
+	{
+		tuple_data_print (_out, snap->tuple_size, snap->data);
 	}
 }
 
+/**
+ * @brief Вывод в буфер Tag/Len/Value структуры
+ */
+static void
+tlv_print (struct tbuf* _out, struct tlv* _tlv)
+{
+	switch (_tlv->tag)
+	{
+		//
+		// В случае если это последовательность команд, то данные
+		// представляют собой последовательность tlv структур
+		//
+		case BOX_MULTI_OP:
+		{
+			//
+			// Начало и конец блока данных
+			//
+			const u8* val = _tlv->val;
+			const u8* vnd = _tlv->val + _tlv->len;
+
+			//
+			// Префикс мульти-операции
+			//
+			tbuf_printf (_out, "BOX_MULTY { ");
+
+			//
+			// Пока не все вложенные tlv-структуры обработаны
+			//
+			// ВНИМАНИЕ: используем проверку на <, а не на !=, так как
+			//           возможен приход невалидных данных, а способа их
+			//           распознать нет
+			//
+			while (val < vnd)
+			{
+				//
+				// Начало вложенной tlv-структуры
+				//
+				struct tlv* nested = (struct tlv*)val;
+
+				//
+				// Рекурсивно вызываем сами себя для обработки вложенной tlv-структуры
+				//
+				tlv_print (_out, nested);
+				//
+				// Выводим разделитель tlv-структур
+				//
+				tbuf_printf (_out, "; ");
+
+				//
+				// Переходим к следующей tlv-структуре
+				//
+				val += sizeof (*nested) + nested->len;
+			}
+
+			//
+			// Суффикс мульти-операции
+			//
+			tbuf_printf (_out, " }");
+			break;
+		}
+
+		//
+		// В случае, если tlv-структура содержит одну команду
+		//
+		case BOX_OP:
+			xlog_print (_out, *(u16*)_tlv->val, &TBUF (_tlv->val + 2, _tlv->len - 2, NULL));
+			break;
+
+		default:
+			tbuf_printf (_out, "unknown tlv %i", _tlv->tag);
+			break;
+	}
+}
 
 void
-box_print_row(struct tbuf *out, u16 tag, struct tbuf *r)
+box_print_row (struct tbuf* _out, u16 _tag, struct tbuf* _r)
 {
-	int tag_type = tag & ~TAG_MASK;
-	tag &= TAG_MASK;
-	if (tag == wal_data) {
-		u16 op = read_u16(r);
-		xlog_print(out, op, r);
-		return;
-	}
-	if (tag == tlv) {
-		while (tbuf_len(r)) {
-			struct tlv *tlv = read_bytes(r, sizeof(*tlv));
-			tbuf_ltrim(r, tlv->len);
+	int tag_type = _tag & ~TAG_MASK;
+	_tag &= TAG_MASK;
 
-			assert(tbuf_len(r) >= 0);
-			tlv_print(out, tlv);
+	if (_tag == wal_data)
+	{
+		u16 op = read_u16 (_r);
+
+		xlog_print (_out, op, _r);
+	}
+
+	else if (_tag == tlv)
+	{
+		while (tbuf_len (_r) > 0)
+		{
+			//
+			// Читаем из буфера заголовок tlv-структуры
+			//
+			struct tlv* tlv = read_bytes (_r, sizeof (*tlv));
+			//
+			// Переходим к данным tlv-структуры
+			//
+			tbuf_ltrim (_r, tlv->len);
+
+			assert (tbuf_len (_r) >= 0);
+			tlv_print (_out, tlv);
 		}
-		return;
 	}
-	if (tag_type == TAG_WAL) {
-		u16 op = tag >> 5;
-		xlog_print(out, op, r);
-		return;
+
+	else if (tag_type == TAG_WAL)
+	{
+		u16 op = _tag >> 5;
+
+		xlog_print (_out, op, _r);
 	}
-	if (tag_type == TAG_SNAP) {
-		if (tag == snap_data) {
-			snap_print(out, r);
-		} else {
-			u16 op = tag >> 5;
-			xlog_print(out, op, r);
+
+	else if (tag_type == TAG_SNAP)
+	{
+		if (_tag == snap_data)
+		{
+			snap_print (_out, _r);
+		}
+		else
+		{
+			u16 op = _tag >> 5;
+
+			xlog_print (_out, op, _r);
 		}
 	}
 }
 
-const char *
-box_row_to_a(u16 tag, struct tbuf *data)
+const char*
+box_row_to_a (u16 _tag, struct tbuf* _data)
 {
-	@try {
-		struct tbuf *buf = tbuf_alloc(fiber->pool);
-		struct tbuf tmp = *data;
-		box_print_row(buf, tag, &tmp);
+	@try
+	{
+		struct tbuf* buf = tbuf_alloc (fiber->pool);
+		struct tbuf  tmp = *_data;
+
+		box_print_row (buf, _tag, &tmp);
+
 		return buf->ptr;
 	}
-	@catch (id e) {
-		return tbuf_to_hex(data);
+	@catch (id e)
+	{
+		return tbuf_to_hex (_data);
 	}
 }
 
 
-@interface BoxPrint: Box <RecoverRow> {
+@interface BoxPrint : Box<RecoverRow>
+{
 	i64 stop_scn;
 }
+
+-(id) init_stop_scn:(i64)_stop_scn;
+-(void) recover_row:(struct row_v12*)_r;
+-(void) wal_final_row;
 @end
 
 @implementation BoxPrint
-- (id)
-init_stop_scn:(i64)stop_scn_
+-(id)
+init_stop_scn:(i64)_stop_scn
 {
 	[super init];
-	stop_scn = stop_scn_;
+	stop_scn = _stop_scn;
 	return self;
 }
 
-- (void)
-recover_row:(struct row_v12 *)r
+-(void)
+recover_row:(struct row_v12*)_r
 {
-	struct tbuf *buf = tbuf_alloc(fiber->pool);
-	[self print:r into:buf];
-	puts(buf->ptr);
-	if (r->scn >= stop_scn && (r->tag & ~TAG_MASK) == TAG_WAL)
-		exit(0);
-}
-- (void)
-wal_final_row
-{
-	say_error("unable to find record with SCN:%"PRIi64, stop_scn);
-	exit(EX_OSFILE);
+	struct tbuf* buf = tbuf_alloc (fiber->pool);
+
+	[self print:_r into:buf];
+	puts (buf->ptr);
+
+	if ((_r->scn >= stop_scn) && ((_r->tag & ~TAG_MASK) == TAG_WAL))
+		exit (0);
 }
 
+-(void)
+wal_final_row
+{
+	say_error ("unable to find record with SCN:%"PRIi64, stop_scn);
+	exit (EX_OSFILE);
+}
 @end
 
 int
-box_cat_scn(i64 stop_scn)
+box_cat_scn (i64 _stop_scn)
 {
-	BoxPrint *printer = [[BoxPrint alloc] init_stop_scn:stop_scn];
-	XLogReader *reader = [[XLogReader alloc] init_recovery:(id)printer];
-	XLog *initial_snap = [snap_dir find_with_scn:stop_scn shard:0];
-	[reader load_full:initial_snap];
+	BoxPrint*   printer = [[BoxPrint alloc] init_stop_scn:_stop_scn];
+	XLogReader* reader  = [[XLogReader alloc] init_recovery:(id)printer];
+
+	XLog* snap = [snap_dir find_with_scn:_stop_scn shard:0];
+
+	[reader load_full:snap];
 	return 0;
 }
 
 int
-box_cat(const char *filename)
+box_cat (const char* _fname)
 {
-	const char *q = getenv("BOX_CAT_FMT");
-	if (q)
-		fmt_ini = q;
-	q = getenv("BOX_CAT_SNAP_SPACE");
-	if (q)
-		snap_space = atoi(q);
+	//
+	// Формат вывода записей
+	//
+	{
+		const char* q = getenv ("BOX_CAT_FMT");
+		if (q)
+			fmt_ini = q;
+	}
 
-	read_log(filename, box_print_row);
-	return 0; /* ignore return status of read_log */
+	//
+	// Таблица для вывода
+	//
+	{
+		const char* q = getenv ("BOX_CAT_SNAP_SPACE");
+		if (q)
+			snap_space = atoi (q);
+	}
+
+	read_log (_fname, box_print_row);
+
+	return 0; /* игнорируем результат вызова read_log */
 }
+
+register_source ();

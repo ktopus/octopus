@@ -37,9 +37,13 @@
 #import <spawn_child.h>
 #import <shard.h>
 
+#import <mod/box/op.h>
+#import <mod/box/meta_op.h>
 #import <mod/box/box.h>
 #import <mod/box/src-lua/moonbox.h>
 #import <mod/box/box_version.h>
+#import <mod/box/print.h>
+#import <mod/box/tuple_index.h>
 #import <mod/feeder/feeder.h>
 
 #if CFG_lua_path
@@ -59,11 +63,460 @@
 static struct iproto_service box_primary;
 static struct iproto_service box_secondary;
 
-static void initialize_primary_service ();
+#define foreach_op(...) for (int* op = (int[]){__VA_ARGS__, 0}; *op; ++op)
 
-static void initialize_secondary_service ();
+/**
+ * @brief Инициализация обработчиков запросов
+ */
+static void
+box_service (struct iproto_service* s)
+{
+	//
+	// Регистрируем обработчики выборок
+	//
+	foreach_op (NOP, SELECT, SELECT_LIMIT)
+		service_register_iproto (s, *op, box_select_cb, IPROTO_NONBLOCK);
 
-extern void tuple_print (struct tbuf* _buf, u32 _cardinality, void* _f);
+	//
+	// Регистрируем обработчики команд модификации данных
+	//
+	foreach_op (INSERT, UPDATE_FIELDS, DELETE, DELETE_1_3)
+		service_register_iproto (s, *op, box_cb, IPROTO_ON_MASTER);
+
+	//
+	// Регистрируем обработчики команд модификации мета-информации
+	//
+	foreach_op (CREATE_OBJECT_SPACE, CREATE_INDEX, DROP_OBJECT_SPACE, DROP_INDEX, TRUNCATE)
+		service_register_iproto (s, *op, box_meta_cb, IPROTO_ON_MASTER|IPROTO_WLOCK);
+
+#if CFG_lua_path || CFG_caml_path
+	//
+	// allow select only lua procedures updates are blocked by luaT_box_dispatch()
+	//
+	service_register_iproto (s, EXEC_LUA, box_proc_cb, 0);
+#endif
+}
+
+/**
+ * @brief Обработчик изменений БД для сервиса только-чтение
+ */
+static void
+box_roerr (struct netmsg_head* _h __attribute__((unused)), struct iproto* _request __attribute__((unused)))
+{
+	iproto_raise (ERR_CODE_NONMASTER, "updates are forbidden");
+}
+
+/**
+ * @brief Инициализация обработчиков запросов для систем только-чтение
+ */
+static void
+box_service_ro (struct iproto_service* _s)
+{
+	service_register_iproto (_s, SELECT, box_select_cb, IPROTO_NONBLOCK);
+	service_register_iproto (_s, SELECT_LIMIT, box_select_cb, IPROTO_NONBLOCK);
+
+	foreach_op (INSERT, UPDATE_FIELDS, DELETE, DELETE_1_3, PAXOS_LEADER,
+				CREATE_OBJECT_SPACE, CREATE_INDEX, DROP_OBJECT_SPACE, DROP_INDEX, TRUNCATE)
+		service_register_iproto (_s, *op, box_roerr, IPROTO_NONBLOCK);
+
+#if CFG_lua_path || CFG_caml_path
+	//
+	// allow select only lua procedures updates are blocked by luaT_box_dispatch()
+	//
+	service_register_iproto (_s, EXEC_LUA, box_proc_cb, 0);
+#endif
+}
+
+/**
+ * @brief Инициализация базовых служб и сопроцедур
+ */
+static void
+initialize_primary_service ()
+{
+	say_info ("box %s (%i workers)", __func__, cfg.wal_writer_inbox_size);
+
+	//
+	// Инициализация службы приёма и диспетчеризации запросов
+	//
+	iproto_service (&box_primary, cfg.primary_addr);
+	box_primary.options = SERVICE_SHARDED;
+
+	//
+	// Настройка сервиса обработки запросов
+	//
+	box_service (&box_primary);
+	//
+	// Настройка сервиса репликации
+	//
+	feeder_service (&box_primary);
+
+	//
+	// Запускаем сопроцедуры записи журнала на диск
+	//
+	for (int i = 0; i < MAX (1, cfg.wal_writer_inbox_size); ++i)
+		fiber_create ("box_worker", iproto_worker, &box_primary);
+}
+
+/**
+ * @brief Инициализация дополнительных служб и сопроцедур
+ */
+static void
+initialize_secondary_service ()
+{
+	//
+	// Если задан дополнительный адрес обработки запросов и он не совпадает с первичным
+	//
+	if ((cfg.secondary_addr != NULL) && (strcmp (cfg.secondary_addr, cfg.primary_addr) != 0))
+	{
+		say_info ("box %s", __func__);
+
+		iproto_service (&box_secondary, cfg.secondary_addr);
+		box_secondary.options = SERVICE_SHARDED;
+
+		box_service_ro (&box_secondary);
+		fiber_create   ("box_secondary_worker", iproto_worker, &box_secondary);
+	}
+}
+
+/**
+ * @brief Вторая часть инициализации
+ */
+static void
+init_second_stage (va_list _ap __attribute__((unused)))
+{
+#if CFG_lua_path
+	//
+	// Инициализация подсистемы запуска Lua-скриптов
+	//
+	luaT_openbox (root_L);
+	luaO_require_or_panic ("box_init", false, NULL);
+#endif
+
+#if CFG_caml_path
+	//
+	// Инициализация подсистемы запуска Ocaml-скриптов
+	//
+	extern void oct_caml_plugins ();
+	oct_caml_plugins ();
+#endif
+
+	if (box_primary.name != NULL)
+		[recovery simple:&box_primary];
+	else
+		[recovery simple:NULL];
+}
+
+/**
+ * @brief Статистика по использованию памяти
+ */
+static void
+stat_mem_callback (int _base _unused_)
+{
+	char cbuf[64];
+	struct tbuf buf = TBUF_BUF (cbuf);
+
+	for (int i = 0; i < MAX_SHARD; ++i)
+	{
+		id<Shard> shard = [recovery shard:i];
+		if (shard == nil)
+			continue;
+
+		id<Executor> exec = [shard executor];
+		if (![(id)exec isKindOf: [Box class]])
+			continue;
+
+		Box* box = exec;
+		for (uint32_t n = 0; n < nelem(box->object_space_registry); ++n)
+		{
+			if (box->object_space_registry[n] == NULL)
+				continue;
+
+			struct object_space* osp = box->object_space_registry[n];
+
+			//
+			// Общая часть имён
+			//
+			tbuf_reset      (&buf);
+			tbuf_append_lit (&buf, "space_");
+			tbuf_putu       (&buf, n);
+			tbuf_putc       (&buf, '@');
+			tbuf_putu       (&buf, i);
+			size_t len = tbuf_len (&buf);
+
+			tbuf_append_lit (&buf, "_objects");
+			stat_report_gauge (buf.ptr, tbuf_len(&buf), [osp->index[0] size]);
+
+			tbuf_reset_to   (&buf, len);
+			tbuf_append_lit (&buf, "_obj_bytes");
+			stat_report_gauge (buf.ptr, tbuf_len(&buf), osp->obj_bytes);
+
+			tbuf_reset_to   (&buf, len);
+			tbuf_append_lit (&buf, "_slab_bytes");
+			stat_report_gauge(buf.ptr, tbuf_len(&buf), osp->slab_bytes);
+
+			//
+			// Общая часть имён для вывода индексов
+			//
+			tbuf_reset_to   (&buf, len);
+			tbuf_append_lit (&buf, "_ix_");
+			len = tbuf_len (&buf);
+
+			foreach_index (index, osp)
+			{
+				tbuf_reset_to   (&buf, len);
+				tbuf_putu       (&buf, index->conf.n);
+				tbuf_append_lit (&buf, "_bytes");
+				stat_report_gauge (buf.ptr, tbuf_len(&buf), [index bytes]);
+			}
+		}
+	}
+}
+
+/**
+ * @brief Первая часть инициализации, которая непосредственно
+ *        вызывается для инициализации модуля
+ */
+static void
+init (void)
+{
+	title ("loading");
+
+	recovery = [[Recovery alloc] init];
+	recovery->default_exec_class = [Box class];
+
+	//
+	// Если задана начальная инициализация хранилища
+	//
+	if (init_storage)
+	{
+		if (cfg.object_space)
+			[recovery shard_create_dummy:NULL];
+
+		return;
+	}
+
+	//
+	// Инициализация системы управления памятью для box_phi и box_phi_cell
+	//
+	phi_cache_init ();
+
+	//
+	// Инициализация сбора статистики
+	//
+	box_stat_init ();
+
+	//
+	// Регистрация процедуры сбора статистики использования памяти
+	//
+	stat_register_callback ("box_mem", stat_mem_callback);
+
+	//
+	// Инициализация сервисов
+	//
+	if (cfg.object_space == NULL)
+	{
+		initialize_primary_service ();
+
+		initialize_secondary_service ();
+	}
+
+	//
+	// Второй этап инициализации должен выполняться в сопроцедуре для
+	// нормальной работы получения данных с удалённого сервера
+	//
+	fiber_create ("box_init", init_second_stage);
+}
+
+/**
+ * @brief Вывод информации о сервисе
+ */
+static void
+info (struct tbuf* _out, const char* _what)
+{
+	extern Recovery* recovery;
+
+	if (_what == NULL)
+	{
+		tbuf_printf (_out, "info:" CRLF);
+		tbuf_printf (_out, "  version: \"%s\"" CRLF, octopus_version ());
+		tbuf_printf (_out, "  uptime: %i" CRLF, tnt_uptime ());
+		tbuf_printf (_out, "  pid: %i" CRLF, getpid ());
+		tbuf_printf (_out, "  lsn: %" PRIi64 CRLF, [recovery lsn]);
+		tbuf_printf (_out, "  shards:" CRLF);
+
+		for (int i = 0; i < MAX_SHARD; ++i)
+		{
+			id<Shard> shard = [recovery shard:i];
+			if (shard == nil)
+				continue;
+
+			tbuf_printf (_out, "  - shard_id: %i" CRLF, i);
+			tbuf_printf (_out, "    scn: %" PRIi64 CRLF, [shard scn]);
+			tbuf_printf (_out, "    status: %s%s%s" CRLF, [shard status],
+							cfg.custom_proc_title ? "@" : "", cfg.custom_proc_title ?: "");
+
+			if ([shard is_replica])
+			{
+				tbuf_printf (_out, "    recovery_lag: %.3f" CRLF, [shard lag]);
+				tbuf_printf (_out, "    recovery_last_update: %.3f" CRLF, [shard last_update_tstamp]);
+				if (!cfg.ignore_run_crc)
+					tbuf_printf (_out, "    recovery_run_crc_status: %s" CRLF, [shard run_crc_status]);
+			}
+
+			Box* box = [shard executor];
+			tbuf_printf (_out, "    namespaces:" CRLF);
+			for (uint32_t n = 0; n < nelem(box->object_space_registry); ++n)
+			{
+				if (box->object_space_registry[n] == NULL)
+					continue;
+
+				struct object_space* osp = box->object_space_registry[n];
+				tbuf_printf (_out, "    - n: %i"CRLF, n);
+				tbuf_printf (_out, "      objects: %i"CRLF, [osp->index[0] size]);
+				tbuf_printf (_out, "      obj_bytes: %zi"CRLF, osp->obj_bytes);
+				tbuf_printf (_out, "      slab_bytes: %zi"CRLF, osp->slab_bytes);
+				tbuf_printf (_out, "      indexes:"CRLF);
+
+				foreach_index (index, osp)
+					tbuf_printf (_out, "      - { index: %i, slots: %i, bytes: %zi }" CRLF,
+									index->conf.n, [index slots], [index bytes]);
+			}
+		}
+
+		tbuf_printf (_out, "  config: \"%s\""CRLF, cfg_filename);
+	}
+
+	else if (strcmp (_what, "net") == 0)
+	{
+		if (box_primary.name != NULL)
+			iproto_service_info (_out, &box_primary);
+
+		if (box_secondary.name != NULL)
+			iproto_service_info (_out, &box_secondary);
+	}
+}
+
+/**
+ * @brief Проверка конфигурации
+ */
+static int
+check_config (struct octopus_cfg* _new)
+{
+	extern void out_warning (int _v, char* _format, ...);
+
+	struct feeder_param feeder;
+	enum feeder_cfg_e e = feeder_param_fill_from_cfg (&feeder, _new);
+
+	bool errors = false;
+	if (e)
+	{
+		out_warning (0, "wal_feeder config is wrong");
+		errors = true;
+	}
+
+	if (_new->object_space != NULL)
+	{
+		for (int i = 0; i < OBJECT_SPACE_MAX; ++i)
+		{
+			if (_new->object_space[i] == NULL)
+				break;
+
+			if (!CNF_STRUCT_DEFINED (_new->object_space[i]))
+				continue;
+
+			if (_new->object_space[i]->index == NULL)
+			{
+				out_warning (0, "(object_space = %" PRIu32 ") at least one index must be defined", i);
+				errors = true;
+			}
+
+			for (int j = 0; j < MAX_IDX; ++j)
+			{
+				if (_new->object_space[i]->index[j] == NULL)
+					break;
+
+				if (!CNF_STRUCT_DEFINED (_new->object_space[i]->index[j]))
+					continue;
+
+				struct index_conf* ic = cfg_box2index_conf (_new->object_space[i]->index[j], i, j, 0);
+				if (ic == NULL)
+					errors = true;
+				else
+					free (ic);
+			}
+		}
+	}
+
+	if (_new->on_snapshot_duplicates)
+	{
+		for (int i = 0; _new->on_snapshot_duplicates[i]; ++i)
+		{
+			if (!CNF_STRUCT_DEFINED (_new->on_snapshot_duplicates[i]))
+				continue;
+
+			__typeof__ (_new->on_snapshot_duplicates[i]->index) indexes = _new->on_snapshot_duplicates[i]->index;
+			if (indexes == NULL)
+			{
+				out_warning (0, "no indexes for on_snapshot_duplicates[%d]", i);
+				errors = true;
+			}
+			else
+			{
+				for (int j = 0; indexes[j]; ++j)
+				{
+					if (!CNF_STRUCT_DEFINED (indexes[j]))
+						continue;
+
+#define eq(t, s) (strcmp((t),(s)) == 0)
+					const char* action = indexes[j]->action;
+					if (!action || !(eq (action, "DELETE") || !eq (action, "IGNORE")))
+						out_warning (0, "on_snapshot_duplicates[%d].index[%d].action unknown (=\"%s\")",
+										i, j, action ?: "<null>");
+#undef eq
+				}
+			}
+		}
+	}
+
+	return errors ? -1 : 0;
+}
+
+/**
+ * @brief Перезагрузка конфигурации
+ */
+static void
+reload_config (struct octopus_cfg* _old __attribute__((unused)), struct octopus_cfg* _new __attribute__((unused)))
+{
+	Shard<Shard>* shard = [recovery shard:0];
+	if ((shard == NULL) || !shard->dummy)
+	{
+		say_error ("ignoring legacy configuration request");
+		return;
+	}
+
+	if ([(id)shard respondsTo:@selector (adjust_route)])
+		[(id)shard perform:@selector (adjust_route)];
+	else
+		say_error ("ignoring unsupported configuration request");
+}
+
+Box*
+shard_box ()
+{
+	return ((struct box_txn*)fiber->txn)->box;
+}
+
+int
+shard_box_id ()
+{
+	return shard_box ()->shard->id;
+}
+
+int
+box_version ()
+{
+	return shard_box ()->version;
+}
 
 struct object_space*
 object_space (Box* _box, int _n)
@@ -120,7 +573,7 @@ configure_index (int _i, int _j, Index* _pk)
 	//
 	// Создаём индекс с заданной конфигурацией и удаляем её
 	//
-	Index* index = [Index new_conf:ic dtor:&box_tuple_dtor];
+	Index* index = [Index new_conf:ic dtor:box_tuple_dtor ()];
 	free (ic);
 
 	//
@@ -200,14 +653,6 @@ configure_pk (Box* _box)
 	}
 }
 
-/**
- * @brief Функция реагирования на найденный дубликат
- *
- * @param _varg[in] аргументы сортировки
- * @param _a[in] предыдущий дубликат
- * @param _b[in] найденный дубликат
- * @param _pos[in] позиция дубликата в массиве узлов
- */
 void
 box_idx_print_dups (void* _varg, struct index_node* _a, struct index_node* _b, uint32_t _pos)
 {
@@ -590,22 +1035,6 @@ configure_secondary (Box* _box)
 	}
 }
 
-@implementation Box
-
-- (void)
-set_shard:(Shard<Shard>*)_shard
-{
-	shard = _shard;
-
-	if (cfg.object_space != NULL)
-	{
-		if (shard->dummy)
-			configure_pk (self);
-		else
-			say_warn ("cfg.object_space ignored");
-	}
-}
-
 /**
  * @brief Распаковка команд и их выполнение
  */
@@ -672,6 +1101,57 @@ prepare_tlv (struct box_txn* _tx, const struct tlv* _tlv)
 		//
 		default:
 			break;
+	}
+}
+
+/**
+ * @brief Проверяем индексы на эквивалентность по количеству записей в них
+ */
+static int
+verify_indexes (struct object_space* _osp, size_t _rows)
+{
+	struct tnt_object* obj = NULL;
+	foreach_index (index, _osp)
+	{
+		if (index->conf.n == 0)
+			continue;
+
+		title ("snap_dump/check index:%i", index->conf.n);
+
+		[index iterator_init];
+		size_t index_rows = 0;
+		while ((obj = [index iterator_next]))
+		{
+			obj = tuple_visible_left (obj);
+			if (obj == NULL)
+				continue;
+
+			++index_rows;
+		}
+
+		if (_rows != index_rows)
+		{
+			say_error ("heap invariant violation: n:%i index:%i rows:%zi != pk_rows:%zi",
+							_osp->n, index->conf.n, index_rows, _rows);
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
+@implementation Box
+-(void)
+set_shard:(Shard<Shard>*)_shard
+{
+	shard = _shard;
+
+	if (cfg.object_space != NULL)
+	{
+		if (shard->dummy)
+			configure_pk (self);
+		else
+			say_warn ("cfg.object_space ignored");
 	}
 }
 
@@ -954,7 +1434,7 @@ snapshot_fold
 	return 0;
 }
 
-- (u32)
+-(u32)
 snapshot_estimate
 {
 	//
@@ -967,42 +1447,6 @@ snapshot_estimate
 			total_rows += [object_space_registry[n]->index[0] size];
 	}
 	return total_rows;
-}
-
-/**
- * @brief Проверяем индексы на эквивалентность по количеству записей в них
- */
-static int
-verify_indexes (struct object_space* _osp, size_t _rows)
-{
-	struct tnt_object* obj = NULL;
-	foreach_index (index, _osp)
-	{
-		if (index->conf.n == 0)
-			continue;
-
-		title ("snap_dump/check index:%i", index->conf.n);
-
-		[index iterator_init];
-		size_t index_rows = 0;
-		while ((obj = [index iterator_next]))
-		{
-			obj = tuple_visible_left (obj);
-			if (obj == NULL)
-				continue;
-
-			++index_rows;
-		}
-
-		if (_rows != index_rows)
-		{
-			say_error ("heap invariant violation: n:%i index:%i rows:%zi != pk_rows:%zi",
-							_osp->n, index->conf.n, index_rows, _rows);
-			return -1;
-		}
-	}
-
-	return 0;
 }
 
 -(int)
@@ -1195,376 +1639,7 @@ snapshot_write_rows:(XLog*)_log
 
 	return 0;
 }
-
 @end
-
-/**
- * @brief Инициализация базовых служб и сопроцедур
- */
-static void
-initialize_primary_service ()
-{
-	say_info ("box %s (%i workers)", __func__, cfg.wal_writer_inbox_size);
-
-	//
-	// Инициализация службы приёма и диспетчеризации запросов
-	//
-	iproto_service (&box_primary, cfg.primary_addr);
-	box_primary.options = SERVICE_SHARDED;
-
-	//
-	// Настройка сервиса обработки запросов
-	//
-	box_service (&box_primary);
-	//
-	// Настройка сервиса репликации
-	//
-	feeder_service (&box_primary);
-
-	//
-	// Запускаем сопроцедуры записи журнала на диск
-	//
-	for (int i = 0; i < MAX (1, cfg.wal_writer_inbox_size); ++i)
-		fiber_create ("box_worker", iproto_worker, &box_primary);
-}
-
-/**
- * @brief Инициализация дополнительных служб и сопроцедур
- */
-static void
-initialize_secondary_service ()
-{
-	//
-	// Если задан дополнительный адрес обработки запросов и он не совпадает с первичным
-	//
-	if ((cfg.secondary_addr != NULL) && (strcmp (cfg.secondary_addr, cfg.primary_addr) != 0))
-	{
-		say_info ("box %s", __func__);
-
-		iproto_service (&box_secondary, cfg.secondary_addr);
-		box_secondary.options = SERVICE_SHARDED;
-
-		box_service_ro (&box_secondary);
-		fiber_create   ("box_secondary_worker", iproto_worker, &box_secondary);
-	}
-}
-
-/**
- * @brief Вторая часть инициализации
- */
-static void
-init_second_stage (va_list _ap __attribute__((unused)))
-{
-#if CFG_lua_path
-	//
-	// Инициализация подсистемы запуска Lua-скриптов
-	//
-	luaT_openbox (root_L);
-	luaO_require_or_panic ("box_init", false, NULL);
-#endif
-
-#if CFG_caml_path
-	//
-	// Инициализация подсистемы запуска Ocaml-скриптов
-	//
-	extern void oct_caml_plugins ();
-	oct_caml_plugins ();
-#endif
-
-	if (box_primary.name != NULL)
-		[recovery simple:&box_primary];
-	else
-		[recovery simple:NULL];
-}
-
-/**
- * @brief Статистика по использованию памяти
- */
-static void
-stat_mem_callback (int _base _unused_)
-{
-	char cbuf[64];
-	struct tbuf buf = TBUF_BUF (cbuf);
-
-	for (int i = 0; i < MAX_SHARD; ++i)
-	{
-		id<Shard> shard = [recovery shard:i];
-		if (shard == nil)
-			continue;
-
-		id<Executor> exec = [shard executor];
-		if (![(id)exec isKindOf: [Box class]])
-			continue;
-
-		Box* box = exec;
-		for (uint32_t n = 0; n < nelem(box->object_space_registry); ++n)
-		{
-			if (box->object_space_registry[n] == NULL)
-				continue;
-
-			struct object_space* osp = box->object_space_registry[n];
-
-			//
-			// Общая часть имён
-			//
-			tbuf_reset      (&buf);
-			tbuf_append_lit (&buf, "space_");
-			tbuf_putu       (&buf, n);
-			tbuf_putc       (&buf, '@');
-			tbuf_putu       (&buf, i);
-			size_t len = tbuf_len (&buf);
-
-			tbuf_append_lit (&buf, "_objects");
-			stat_report_gauge (buf.ptr, tbuf_len(&buf), [osp->index[0] size]);
-
-			tbuf_reset_to   (&buf, len);
-			tbuf_append_lit (&buf, "_obj_bytes");
-			stat_report_gauge (buf.ptr, tbuf_len(&buf), osp->obj_bytes);
-
-			tbuf_reset_to   (&buf, len);
-			tbuf_append_lit (&buf, "_slab_bytes");
-			stat_report_gauge(buf.ptr, tbuf_len(&buf), osp->slab_bytes);
-
-			//
-			// Общая часть имён для вывода индексов
-			//
-			tbuf_reset_to   (&buf, len);
-			tbuf_append_lit (&buf, "_ix_");
-			len = tbuf_len (&buf);
-
-			foreach_index (index, osp)
-			{
-				tbuf_reset_to   (&buf, len);
-				tbuf_putu       (&buf, index->conf.n);
-				tbuf_append_lit (&buf, "_bytes");
-				stat_report_gauge (buf.ptr, tbuf_len(&buf), [index bytes]);
-			}
-		}
-	}
-}
-
-/**
- * @brief Первая часть инициализации, которая непосредственно
- *        вызывается для инициализации модуля
- */
-static void
-init (void)
-{
-	title ("loading");
-
-	recovery = [[Recovery alloc] init];
-	recovery->default_exec_class = [Box class];
-
-	//
-	// Если задана начальная инициализация хранилища
-	//
-	if (init_storage)
-	{
-		if (cfg.object_space)
-			[recovery shard_create_dummy:NULL];
-
-		return;
-	}
-
-	//
-	// Инициализация подсистемы выполнения операций
-	//
-	box_op_init ();
-
-	//
-	// Регистрация процедуры сбора статистики использования памяти
-	//
-	stat_register_callback ("box_mem", stat_mem_callback);
-
-	//
-	// Инициализация сервисов
-	//
-	if (cfg.object_space == NULL)
-	{
-		initialize_primary_service ();
-
-		initialize_secondary_service ();
-	}
-
-	//
-	// Второй этап инициализации должен выполняться в сопроцедуре для
-	// нормальной работы получения данных с удалённого сервера
-	//
-	fiber_create ("box_init", init_second_stage);
-}
-
-/**
- * @brief Вывод информации о сервисе
- */
-static void
-info (struct tbuf* _out, const char* _what)
-{
-	extern Recovery* recovery;
-
-	if (_what == NULL)
-	{
-		tbuf_printf (_out, "info:" CRLF);
-		tbuf_printf (_out, "  version: \"%s\"" CRLF, octopus_version ());
-		tbuf_printf (_out, "  uptime: %i" CRLF, tnt_uptime ());
-		tbuf_printf (_out, "  pid: %i" CRLF, getpid ());
-		tbuf_printf (_out, "  lsn: %" PRIi64 CRLF, [recovery lsn]);
-		tbuf_printf (_out, "  shards:" CRLF);
-
-		for (int i = 0; i < MAX_SHARD; ++i)
-		{
-			id<Shard> shard = [recovery shard:i];
-			if (shard == nil)
-				continue;
-
-			tbuf_printf (_out, "  - shard_id: %i" CRLF, i);
-			tbuf_printf (_out, "    scn: %" PRIi64 CRLF, [shard scn]);
-			tbuf_printf (_out, "    status: %s%s%s" CRLF, [shard status],
-							cfg.custom_proc_title ? "@" : "", cfg.custom_proc_title ?: "");
-
-			if ([shard is_replica])
-			{
-				tbuf_printf (_out, "    recovery_lag: %.3f" CRLF, [shard lag]);
-				tbuf_printf (_out, "    recovery_last_update: %.3f" CRLF, [shard last_update_tstamp]);
-				if (!cfg.ignore_run_crc)
-					tbuf_printf (_out, "    recovery_run_crc_status: %s" CRLF, [shard run_crc_status]);
-			}
-
-			Box* box = [shard executor];
-			tbuf_printf (_out, "    namespaces:" CRLF);
-			for (uint32_t n = 0; n < nelem(box->object_space_registry); ++n)
-			{
-				if (box->object_space_registry[n] == NULL)
-					continue;
-
-				struct object_space* osp = box->object_space_registry[n];
-				tbuf_printf (_out, "    - n: %i"CRLF, n);
-				tbuf_printf (_out, "      objects: %i"CRLF, [osp->index[0] size]);
-				tbuf_printf (_out, "      obj_bytes: %zi"CRLF, osp->obj_bytes);
-				tbuf_printf (_out, "      slab_bytes: %zi"CRLF, osp->slab_bytes);
-				tbuf_printf (_out, "      indexes:"CRLF);
-
-				foreach_index (index, osp)
-					tbuf_printf (_out, "      - { index: %i, slots: %i, bytes: %zi }" CRLF,
-									index->conf.n, [index slots], [index bytes]);
-			}
-		}
-
-		tbuf_printf (_out, "  config: \"%s\""CRLF, cfg_filename);
-	}
-
-	else if (strcmp (_what, "net") == 0)
-	{
-		if (box_primary.name != NULL)
-			iproto_service_info (_out, &box_primary);
-
-		if (box_secondary.name != NULL)
-			iproto_service_info (_out, &box_secondary);
-	}
-}
-
-/**
- * @brief Проверка конфигурации
- */
-static int
-check_config (struct octopus_cfg* _new)
-{
-	extern void out_warning (int _v, char* _format, ...);
-
-	struct feeder_param feeder;
-	enum feeder_cfg_e e = feeder_param_fill_from_cfg (&feeder, _new);
-
-	bool errors = false;
-	if (e)
-	{
-		out_warning (0, "wal_feeder config is wrong");
-		errors = true;
-	}
-
-	if (_new->object_space != NULL)
-	{
-		for (int i = 0; i < OBJECT_SPACE_MAX; ++i)
-		{
-			if (_new->object_space[i] == NULL)
-				break;
-
-			if (!CNF_STRUCT_DEFINED (_new->object_space[i]))
-				continue;
-
-			if (_new->object_space[i]->index == NULL)
-			{
-				out_warning (0, "(object_space = %" PRIu32 ") at least one index must be defined", i);
-				errors = true;
-			}
-
-			for (int j = 0; j < MAX_IDX; ++j)
-			{
-				if (_new->object_space[i]->index[j] == NULL)
-					break;
-
-				if (!CNF_STRUCT_DEFINED (_new->object_space[i]->index[j]))
-					continue;
-
-				struct index_conf* ic = cfg_box2index_conf (_new->object_space[i]->index[j], i, j, 0);
-				if (ic == NULL)
-					errors = true;
-				else
-					free (ic);
-			}
-		}
-	}
-
-	if (_new->on_snapshot_duplicates)
-	{
-		for (int i = 0; _new->on_snapshot_duplicates[i]; ++i)
-		{
-			if (!CNF_STRUCT_DEFINED (_new->on_snapshot_duplicates[i]))
-				continue;
-
-			__typeof__ (_new->on_snapshot_duplicates[i]->index) indexes = _new->on_snapshot_duplicates[i]->index;
-			if (indexes == NULL)
-			{
-				out_warning (0, "no indexes for on_snapshot_duplicates[%d]", i);
-				errors = true;
-			}
-			else
-			{
-				for (int j = 0; indexes[j]; ++j)
-				{
-					if (!CNF_STRUCT_DEFINED (indexes[j]))
-						continue;
-
-#define eq(t, s) (strcmp((t),(s)) == 0)
-					const char* action = indexes[j]->action;
-					if (!action || !(eq (action, "DELETE") || !eq (action, "IGNORE")))
-						out_warning (0, "on_snapshot_duplicates[%d].index[%d].action unknown (=\"%s\")",
-										i, j, action ?: "<null>");
-#undef eq
-				}
-			}
-		}
-	}
-
-	return errors ? -1 : 0;
-}
-
-/**
- * @brief Перезагрузка конфигурации
- */
-static void
-reload_config (struct octopus_cfg* _old __attribute__((unused)), struct octopus_cfg* _new __attribute__((unused)))
-{
-	Shard<Shard>* shard = [recovery shard:0];
-	if ((shard == NULL) || !shard->dummy)
-	{
-		say_error ("ignoring legacy configuration request");
-		return;
-	}
-
-	if ([(id)shard respondsTo:@selector (adjust_route)])
-		[(id)shard perform:@selector (adjust_route)];
-	else
-		say_error ("ignoring unsupported configuration request");
-}
 
 static struct tnt_module box_mod =
 {

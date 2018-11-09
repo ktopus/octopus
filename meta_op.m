@@ -28,7 +28,8 @@
 #import <pickle.h>
 #import <say.h>
 
-#import <mod/box/box.h>
+#import <mod/box/tuple_index.h>
+#import <mod/box/meta_op.h>
 
 /**
  * @brief Создание таблицы
@@ -71,7 +72,7 @@ prepare_create_object_space (struct box_meta_txn* _tx, int _n, struct tbuf* _dat
 	//
 	// Создаём первичный индекс таблицы
 	//
-	_tx->index = [Index new_conf:&ic dtor:&box_tuple_dtor];
+	_tx->index = [Index new_conf:&ic dtor:box_tuple_dtor ()];
 	if (_tx->index == NULL)
 		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "can't create index");
 
@@ -123,7 +124,7 @@ prepare_create_index (struct box_meta_txn* _tx, struct tbuf* _data)
 	//
 	// Создаём индекс таблицы
 	//
-	_tx->index = [Index new_conf:&ic dtor:&box_tuple_dtor];
+	_tx->index = [Index new_conf:&ic dtor:box_tuple_dtor ()];
 	if (_tx->index == nil)
 		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "can't create index");
 
@@ -453,6 +454,79 @@ box_rollback_meta (struct box_meta_txn* _tx)
 		case CREATE_INDEX:
 			[_tx->index free];
 			_tx->index = NULL;
+	}
+}
+
+void
+box_meta_cb (struct netmsg_head* _wbuf, struct iproto* _request)
+{
+	say_debug2 ("%s: op:0x%02x sync:%u", __func__, _request->msg_code, _request->sync);
+
+	//
+	// Модуль, для которого вызвана процедура изменения мета-информации
+	//
+	Box* box = (shard_rt + _request->shard_id)->shard->executor;
+
+	//
+	// Для реплик изменение мета-информации не поддерживается
+	//
+	if ([box->shard is_replica])
+		iproto_raise (ERR_CODE_NONMASTER, "replica is readonly");
+
+	if (box->shard->dummy)
+		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "metadata updates are forbidden because cfg.object_space is configured");
+
+	//
+	// Если мета-информация задана в конфигурации, то её изменение не поддерживается
+	//
+	if (cfg.object_space)
+		say_warn ("metadata updates with configured cfg.object_space");
+
+	//
+	// Создаём мета-транзакцию
+	//
+	struct box_meta_txn txn = {.op = _request->msg_code, .box = box};
+	@try
+	{
+		//
+		// Выполняем мета-команду
+		//
+		box_prepare_meta (&txn, &TBUF (_request->data, _request->data_len, NULL));
+
+		//
+		// Записываем изменения в журнал
+		//
+		if ([box->shard submit:_request->data len:_request->data_len tag:(_request->msg_code<<5)|TAG_WAL] != 1)
+		{
+			box_stat_collect (SUBMIT_ERROR, 1);
+			iproto_raise (ERR_CODE_UNKNOWN_ERROR, "unable write wal row");
+		}
+	}
+	@catch (id e)
+	{
+		//
+		// В случае ошибок откатываем транзакцию
+		//
+		box_rollback_meta (&txn);
+		@throw;
+	}
+
+	@try
+	{
+		//
+		// Подтверждаем выполнение команды
+		//
+		box_commit_meta (&txn);
+
+		iproto_reply_small (_wbuf, _request, ERR_CODE_OK);
+	}
+	@catch (Error* e)
+	{
+		panic_exc_fmt (e, "can't handle exception after WAL write: %s", e->reason);
+	}
+	@catch (id e)
+	{
+		panic_exc_fmt (e, "can't handle unknown exception after WAL write");
 	}
 }
 

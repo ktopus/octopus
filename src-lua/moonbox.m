@@ -39,30 +39,13 @@
 
 #import <src-lua/octopus_lua.h>
 #include <third_party/luajit/src/lj_obj.h> /* for LJ_TCDATA */
+#import <mod/box/op.h>
 #import <mod/box/box.h>
 #import <mod/box/src-lua/moonbox.h>
 
 #import <shard.h>
 
 const int object_space_max_idx = MAX_IDX;
-
-Box *
-shard_box()
-{
-	return ((struct box_txn *)fiber->txn)->box;
-}
-
-int
-shard_box_id()
-{
-	return shard_box()->shard->id;
-}
-
-int
-box_version()
-{
-	return shard_box()->version;
-}
 
 struct object_space *
 object_space_l(Box *box, int n)

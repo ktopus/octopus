@@ -23,7 +23,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
 #import <util.h>
 #import <fiber.h>
 #import <iproto.h>
@@ -39,6 +38,9 @@
 #import <index.h>
 #import <shard.h>
 
+#import <log_io.h>
+
+#import <mod/box/meta_op.h>
 #import <mod/box/box.h>
 #if CFG_lua_path
 #import <mod/box/src-lua/moonbox.h>
@@ -49,315 +51,7 @@
 
 #include <stdint.h>
 
-static int stat_base;
-static int stat_named_base;
-
-/**
- * @brief slab-кэш для распределения объектов box_phi и box_phi_cell
- */
-static struct slab_cache phi_cache;
-
-/**
- * @brief Список символических имён для операций
- */
-char const* const box_ops[] = ENUM_STR_INITIALIZER(MESSAGES);
-
-void __attribute__((noreturn))
-bad_object_type (void)
-{
-	raise_fmt ("bad object type");
-}
-
-void*
-next_field (void* _f)
-{
-	//
-	// Размер поля. Одновременно указатель _f смещается на начало
-	// данных поля записи
-	//
-	u32 size = LOAD_VARINT32 (_f);
-
-	//
-	// Следующее поле записи
-	//
-	return (u8*)_f + size;
-}
-
-void*
-tuple_field (struct tnt_object* _obj, size_t _i)
-{
-	//
-	// Проверяем, что индекс поля меньше числа полей записи
-	//
-	if (_i >= tuple_cardinality (_obj))
-		return NULL;
-
-	//
-	// Первое поле записи
-	//
-	void* f = tuple_data (_obj);
-
-	//
-	// Последовательно идём по всем полям пока не дойдём до поля
-	// с заданным индексом
-	//
-	while (_i-- > 0)
-		f = next_field (f);
-
-	//
-	// Возвращаем указатель на заданное поле
-	//
-	return f;
-}
-
-/**
- * @brief Распределить память для записи с заданным числом полей
- *
- * @param[in] _cardinality число полей записи
- * @param[in] _size общий размер данных записи
- *
- * Следует обратить внимание, что память под обычную запись управляется
- * с помощью подсчёта ссылок. Зачем так сделано не совсем понятно, так
- * как в основном коде запись всегда принадлежит только одному владельцу.
- */
-static struct tnt_object*
-tuple_alloc (unsigned _cardinality, unsigned _size)
-{
-	struct tnt_object* obj = NULL;
-
-	//
-	// Если данные записи могут быть упакованы компактно, то создаём
-	// компактную запись
-	//
-	if ((_cardinality < 256) && (_size < 256))
-	{
-		obj = object_alloc (BOX_SMALL_TUPLE, 0, sizeof (struct box_small_tuple) + _size);
-
-		struct box_small_tuple* tuple = box_small_tuple (obj);
-		tuple->bsize       = _size;
-		tuple->cardinality = _cardinality;
-	}
-	//
-	// Иначе создаём обычную запись
-	//
-	else
-	{
-		obj = object_alloc (BOX_TUPLE, 1, sizeof (struct box_tuple) + _size);
-		object_incr_ref (obj);
-
-		struct box_tuple* tuple = box_tuple (obj);
-		tuple->bsize       = _size;
-		tuple->cardinality = _cardinality;
-	}
-
-	say_debug3 ("%s (%u, %u) = %p", __func__, _cardinality, _size, obj->data);
-	return obj;
-}
-
-void
-tuple_free (struct tnt_object* _obj)
-{
-	say_debug ("%s (%p) of type (%i)", __func__, _obj, _obj->type);
-
-	switch (_obj->type)
-	{
-		case BOX_SMALL_TUPLE:
-			sfree (_obj);
-			break;
-
-		case BOX_TUPLE:
-			object_decr_ref (_obj);
-			break;
-
-		default:
-			assert (false);
-	}
-}
-
-ssize_t
-fields_bsize (u32 _cardinality, const void* _data, u32 _len)
-{
-	//
-	// Буфер для чтения данных из записи
-	//
-	struct tbuf tmp = TBUF (_data, _len, NULL);
-
-	//
-	// Читаем все поля записи
-	//
-	for (int i = 0; i < _cardinality; ++i)
-		read_field (&tmp);
-
-	//
-	// Возвращаем реальный размер записи, посчитанный по её полям
-	//
-	return tmp.ptr - _data;
-}
-
-int
-tuple_valid (struct tnt_object* _obj)
-{
-	@try
-	{
-		//
-		// Явно заданный размер записи должен совпадать с вычисленным по распакованным полям
-		//
-		return fields_bsize (tuple_cardinality (_obj), tuple_data (_obj), tuple_bsize (_obj)) == tuple_bsize (_obj);
-	}
-	@catch (Error* e)
-	{
-		say_error ("%s", e->reason);
-		[e release];
-		return 0;
-	}
-}
-
-void
-net_tuple_add (struct netmsg_head* _h, struct tnt_object* _obj)
-{
-	switch (_obj->type)
-	{
-		case BOX_SMALL_TUPLE:
-		{
-			struct box_small_tuple* small_tuple = box_small_tuple (_obj);
-
-			//
-			// Компактная запись передаётся как обычная запись, чтобы не
-			// усложнять протокол. Память под неё распределяется в пуле
-			// буфера и будет удалена вместе с ним
-			//
-			struct box_tuple* tuple = net_add_alloc (_h, sizeof (struct box_tuple) + small_tuple->bsize);
-			tuple->bsize       = small_tuple->bsize;
-			tuple->cardinality = small_tuple->cardinality;
-			memcpy (tuple->data, small_tuple->data, small_tuple->bsize);
-			break;
-		}
-
-		case BOX_TUPLE:
-		{
-			//
-			// Запись для вывода в буфер
-			//
-			struct box_tuple* tuple = box_tuple (_obj);
-
-			//
-			// Полный размер записи вместе с заголовком
-			//
-			size_t size = sizeof (struct box_tuple) + tuple->bsize;
-
-			//
-			// Вывод записи в буфер
-			//
-			net_add_obj_iov (_h, _obj, tuple, size);
-			break;
-		}
-
-		case BOX_PHI:
-			//
-			// Структура box_phi является внутренней и на сторону клиента не
-			// передаётся
-			//
-			assert (false);
-
-		default:
-			bad_object_type ();
-	}
-}
-
-/**
- * @brief Создать структуру для фиксации изменений для заданных списка изменений,
- *        объекта и операции
- */
-static struct box_phi_cell*
-phi_cell_alloc (struct box_phi* _phi, struct tnt_object* _obj, struct box_op* _bop)
-{
-	//
-	// Получаем блок памяти из фиксированного slab-кэша
-	//
-	struct box_phi_cell* cell = slab_cache_alloc (&phi_cache);
-	//
-	// ... и инициализируем его
-	//
-	bzero (cell, sizeof (struct box_phi_cell));
-
-	//
-	// Заполняем поля
-	//
-	cell->head = _phi;
-	cell->obj  = _obj;
-	cell->bop  = _bop;
-
-	//
-	// Добавляем запись об изменении в список изменений индекса
-	//
-	TAILQ_INSERT_TAIL (&_phi->tailq, cell, link);
-
-	say_debug3 ("%s: %p phi:%p obj:%p", __func__, cell, _phi, _obj);
-	return cell;
-}
-
-/**
- * @brief Создать структуру box_phi для заданных индекса, объекта и операции
- */
-static struct box_phi*
-phi_alloc (Index<BasicIndex>* _index, struct tnt_object* _obj, struct box_op* _bop)
-{
-	//
-	// Получаем блок памяти из фиксированного slab-кэша
-	//
-	struct box_phi* head = slab_cache_alloc (&phi_cache);
-	//
-	// ... и инициализируем его
-	//
-	bzero (head, sizeof (struct box_phi));
-
-	//
-	// Заполняем поля
-	//
-	head->header.type = BOX_PHI;
-	head->index       = _index;
-	head->obj         = _obj;
-	head->bop         = _bop;
-	TAILQ_INIT (&head->tailq);
-
-	say_debug3 ("%s: %p index:%i obj:%p", __func__, head, _index->conf.n, _obj);
-	return head;
-}
-
-/**
- * @brief Получить указатель на структуру box_phi по указателю на её заголовок
- */
-#define box_phi(_obj) container_of (_obj, struct box_phi, header)
-
-struct tnt_object*
-phi_left (struct tnt_object* _obj)
-{
-	if (_obj && (_obj->type == BOX_PHI))
-		_obj = box_phi (_obj)->obj;
-
-	assert ((_obj == NULL) || (_obj->type != BOX_PHI));
-	return _obj;
-}
-
-struct tnt_object*
-phi_right (struct tnt_object* _obj)
-{
-	if (_obj && (_obj->type == BOX_PHI))
-		_obj = TAILQ_LAST (&box_phi (_obj)->tailq, phi_tailq)->obj;
-
-	assert ((_obj == NULL) || (_obj->type != BOX_PHI));
-	return _obj;
-}
-
-struct tnt_object*
-phi_obj (const struct tnt_object* _obj)
-{
-	assert (_obj->type == BOX_PHI);
-
-	struct box_phi* phi = box_phi (_obj);
-
-	return phi->obj ?: TAILQ_FIRST (&phi->tailq)->obj;
-}
+#import <mod/box/op.h>
 
 /**
  * @brief Вставить запись в индекс
@@ -420,8 +114,8 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 		}
 		@catch (id e)
 		{
-			sfree (index_phi);
-			sfree (cell);
+			phi_free (index_phi);
+			phi_cell_free (cell);
 			@throw;
 		}
 	}
@@ -483,7 +177,7 @@ phi_commit (struct box_phi_cell* _cell)
 		// она принадлежит другому объекту, а сам список является частью
 		// списка изменений
 		//
-		sfree (index_phi);
+		phi_free (index_phi);
 	}
 	else
 	{
@@ -573,7 +267,7 @@ phi_rollback (struct box_phi_cell* _cell)
 		// она принадлежит другому объекту, а сам список является частью
 		// списка изменений
 		//
-		sfree (index_phi);
+		phi_free (index_phi);
 	}
 }
 
@@ -1813,65 +1507,6 @@ message_to_boxstat (enum messages _msg)
 	}
 }
 
-void
-object_space_fill_stat_names (struct object_space* _osp)
-{
-	char buf[128];
-	char const** names;
-
-	//
-	// Создаём временную таблицу имён
-	//
-	names = xcalloc (BSS_MAX, sizeof (char const*));
-
-	//
-	// Заполняем временную таблицу
-	//
-	sprintf (buf, "OP_INSERT:%d", _osp->n);
-	names[BSS_INSERT] = xstrdup (buf);
-
-	sprintf (buf, "OP_UPDATE:%d", _osp->n);
-	names[BSS_UPDATE] = xstrdup (buf);
-
-	sprintf (buf, "OP_DELETE:%d", _osp->n);
-	names[BSS_DELETE] = xstrdup (buf);
-	
-	for (int i = 0; i < MAX_IDX; ++i)
-	{
-		sprintf (buf, "SELECT_%d_%d", _osp->n, i);
-		names[BSS_SELECT_IDX0 + i] = xstrdup (buf);
-
-		sprintf (buf, "SELECT_TIME_%d_%d", _osp->n, i);
-		names[BSS_SELECT_TIME_IDX0 + i] = xstrdup (buf);
-
-		sprintf (buf, "SELECT_KEYS_%d_%d", _osp->n, i);
-		names[BSS_SELECT_KEYS_IDX0 + i] = xstrdup (buf);
-
-		sprintf (buf, "SELECT_TUPLES_%d_%d", _osp->n, i);
-		names[BSS_SELECT_TUPLES_IDX0 + i] = xstrdup (buf);
-	}
-
-	//
-	// Регистрируем имена в базе данных
-	//
-	_osp->statbase = stat_register_static ("box", names, BSS_MAX);
-
-	//
-	// Освобождаем временные таблицы
-	//
-	for (int i = 0; i < BSS_MAX; ++i)
-		free ((void*)names[i]);
-	free (names);
-}
-
-void
-object_space_clear_stat_names (struct object_space* _osp)
-{
-	stat_unregister (_osp->statbase);
-
-	_osp->statbase = -1;
-}
-
 /**
  * @brief Выполнить выборку данных из базы
  *
@@ -2134,7 +1769,7 @@ static void box_op_rollback (struct box_op* _bop);
 struct box_op *
 box_prepare (struct box_txn* _txn, int _op, const void* _data, u32 _len)
 {
-	say_debug ("%s op:%i/%s", __func__, _op, box_ops[_op]);
+	say_debug ("%s op:%i/%s", __func__, _op, box_op_name (_op));
 
 	//
 	// Изменение данных в режиме "только чтение" заблокировано
@@ -2335,8 +1970,8 @@ txn_stat_cpu (struct box_txn* _tx)
 		//
 		// Собираем статистику
 		//
-		stat_aggregate_named (stat_named_base, name.ptr, tbuf_len (&name), diff);
-		stat_aggregate_named (stat_named_base, "TXN:cpu", 7, diff);
+		box_stat_aggregate_named (name.ptr, tbuf_len (&name), diff);
+		box_stat_aggregate_named ("TXN:cpu", 7, diff);
 
 		return now;
 	}
@@ -2372,8 +2007,8 @@ txn_cleanup (struct box_txn* _tx)
 	//
 	if (cfg.box_extended_stat && _tx->name)
 	{
-		stat_sum_named (stat_named_base, _tx->name, _tx->namelen, 1);
-		stat_sum_named (stat_named_base, "TXN", 3, 1);
+		box_stat_sum_named (_tx->name, _tx->namelen, 1);
+		box_stat_sum_named ("TXN", 3, 1);
 	}
 }
 
@@ -2417,7 +2052,7 @@ box_op_commit (struct box_op* _bop)
 		//
 		// Удаляем изменение, оно больше не нужно
 		//
-		sfree (cell);
+		phi_cell_free (cell);
 	}
 
 	//
@@ -2432,7 +2067,7 @@ box_op_commit (struct box_op* _bop)
 	//
 	if (cfg.box_extended_stat && (_bop->op != NOP))
 		stat_sum_static (_bop->object_space->statbase, message_to_boxstat (_bop->op), 1);
-	stat_collect (stat_base, _bop->op, 1);
+	box_stat_collect (_bop->op, 1);
 }
 
 void
@@ -2499,7 +2134,7 @@ box_op_rollback (struct box_op* _bop)
 		//
 		// Удаляем изменение, оно больше не нужно
 		//
-		sfree (cell);
+		phi_cell_free (cell);
 	}
 
 	//
@@ -2552,8 +2187,8 @@ box_rollback (struct box_txn* _tx)
 		tbuf_append (&buf, _tx->name, _tx->namelen);
 		tbuf_append_lit (&buf, ":rollback");
 
-		stat_sum_named (stat_named_base, buf.ptr, tbuf_len (&buf), 1);
-		stat_sum_named (stat_named_base, "TXN:rollback", 12, 1);
+		box_stat_sum_named (buf.ptr, tbuf_len (&buf), 1);
+		box_stat_sum_named ("TXN:rollback", 12, 1);
 	}
 }
 
@@ -2711,13 +2346,13 @@ box_submit (struct box_txn* _tx)
 	// Расширенная статистика по времени записи в журнал данных транзакций
 	//
 	if (cfg.box_extended_stat && (submit_start != 0))
-		stat_aggregate_named (stat_named_base, "TXN:submit", 10, (ev_time () - submit_start)*1000);
+		box_stat_aggregate_named ("TXN:submit", 10, (ev_time () - submit_start)*1000);
 
 	//
 	// Если данные в журнал не были записаны
 	//
 	if (_tx->submit == 0)
-		stat_collect (stat_base, SUBMIT_ERROR, 1);
+		box_stat_collect (SUBMIT_ERROR, 1);
 
 	//
 	// Возвращаем количество записей в журнал или -1 если данные не были записаны
@@ -2786,10 +2421,7 @@ box_txn_alloc (int _shard_id, enum txn_mode _mode, const char* _name)
 }
 
 #if CFG_lua_path || CFG_caml_path
-/**
- * @brief Обработка вызова процедур Ocaml и/или LUA
- */
-static void
+void
 box_proc_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 {
 	say_debug ("%s: op:0x%02x sync:%u", __func__, _request->msg_code, _request->sync);
@@ -2885,91 +2517,12 @@ box_proc_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 	}
 	@finally
 	{
-		stat_collect (stat_base, EXEC_LUA, 1);
+		box_stat_collect (EXEC_LUA, 1);
 	}
 }
 #endif
 
-/**
- * @brief Обработчик команд изменения мета-информации
- */
-static void
-box_meta_cb (struct netmsg_head* _wbuf, struct iproto* _request)
-{
-	say_debug2 ("%s: op:0x%02x sync:%u", __func__, _request->msg_code, _request->sync);
-
-	//
-	// Модуль, для которого вызвана процедура изменения мета-информации
-	//
-	Box* box = (shard_rt + _request->shard_id)->shard->executor;
-
-	//
-	// Для реплик изменение мета-информации не поддерживается
-	//
-	if ([box->shard is_replica])
-		iproto_raise (ERR_CODE_NONMASTER, "replica is readonly");
-
-	if (box->shard->dummy)
-		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "metadata updates are forbidden because cfg.object_space is configured");
-
-	//
-	// Если мета-информация задана в конфигурации, то её изменение не поддерживается
-	//
-	if (cfg.object_space)
-		say_warn ("metadata updates with configured cfg.object_space");
-
-	//
-	// Создаём псевдо-транзакцию
-	//
-	struct box_meta_txn txn = {.op = _request->msg_code, .box = box};
-	@try
-	{
-		//
-		// Выполняем мета-команду
-		//
-		box_prepare_meta (&txn, &TBUF (_request->data, _request->data_len, NULL));
-
-		//
-		// Записываем изменения в журнал
-		//
-		if ([box->shard submit:_request->data len:_request->data_len tag:(_request->msg_code<<5)|TAG_WAL] != 1)
-		{
-			stat_collect (stat_base, SUBMIT_ERROR, 1);
-			iproto_raise (ERR_CODE_UNKNOWN_ERROR, "unable write wal row");
-		}
-	}
-	@catch (id e)
-	{
-		//
-		// В случае ошибок откатываем транзакцию
-		//
-		box_rollback_meta (&txn);
-		@throw;
-	}
-
-	@try
-	{
-		//
-		// Подтверждаем выполнение команды
-		//
-		box_commit_meta (&txn);
-
-		iproto_reply_small (_wbuf, _request, ERR_CODE_OK);
-	}
-	@catch (Error* e)
-	{
-		panic_exc_fmt (e, "can't handle exception after WAL write: %s", e->reason);
-	}
-	@catch (id e)
-	{
-		panic_exc_fmt (e, "can't handle unknown exception after WAL write");
-	}
-}
-
-/**
- * @brief Обработчик команд модификации данных базы
- */
-static void
+void
 box_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 {
 	say_debug2 ("%s: c:%p op:0x%02x sync:%u", __func__, NULL, _request->msg_code, _request->sync);
@@ -2977,7 +2530,7 @@ box_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 	//
 	// Создаём транзакцию для выполнения команд
 	//
-	struct box_txn* tx = box_txn_alloc (_request->shard_id, RW, box_ops[_request->msg_code]);
+	struct box_txn* tx = box_txn_alloc (_request->shard_id, RW, box_op_name (_request->msg_code));
 
 	//
 	// Выполненная операция
@@ -3066,10 +2619,7 @@ box_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 	}
 }
 
-/**
- * @brief Обработчик выборок данных из базы
- */
-static void
+void
 box_select_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 {
 	//
@@ -3100,13 +2650,13 @@ box_select_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 	// Таблица для выборки
 	//
 
-	struct object_space* spc = object_space (box, n);
+	struct object_space* osp = object_space (box, n);
 
 	ev_tstamp start = 0;
 	@try
 	{
 		if (cfg.box_extended_stat)
-			stat_sum_static (spc->statbase, BSS_SELECT_IDX0+indexn, 1);
+			stat_sum_static (osp->statbase, BSS_SELECT_IDX0+indexn, 1);
 
 		//
 		// Выход номера индекса за пределы
@@ -3117,14 +2667,14 @@ box_select_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 		//
 		// Индекс для выборки
 		//
-		Index<BasicIndex>* index = spc->index[indexn];
+		Index<BasicIndex>* index = osp->index[indexn];
 		if (index == NULL)
 			iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "index is invalid");
 
 		//
 		// Статистика по количеству ключей для выборки
 		//
-		stat_collect (stat_base, SELECT_KEYS, count);
+		box_stat_collect (SELECT_KEYS, count);
 		//
 		// Для расширенной статистики
 		//
@@ -3133,7 +2683,7 @@ box_select_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 			//
 			// Статистика по использованию индекса
 			//
-			stat_sum_static (spc->statbase, BSS_SELECT_KEYS_IDX0+indexn, count);
+			stat_sum_static (osp->statbase, BSS_SELECT_KEYS_IDX0+indexn, count);
 
 			//
 			// Если число ключей для выборки больше одного или индекс не
@@ -3156,15 +2706,15 @@ box_select_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 		//
 		// Статистика
 		//
-		stat_collect (stat_base, SELECT_TUPLES, found);
+		box_stat_collect (SELECT_TUPLES, found);
 		if  (cfg.box_extended_stat)
-			stat_sum_static (spc->statbase, BSS_SELECT_TUPLES_IDX0+indexn, found);
+			stat_sum_static (osp->statbase, BSS_SELECT_TUPLES_IDX0+indexn, found);
 	}
 	@catch (id e)
 	{
 		char statname[] = "SELECT_ERR_000\0";
 		int len = sprintf (statname, "SELECT_ERR_%d", n);
-		stat_sum_named (stat_named_base, statname, len, 1);
+		box_stat_sum_named (statname, len, 1);
 
 		@throw;
 	}
@@ -3176,81 +2726,15 @@ box_select_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 		if (start != 0)
 		{
 			double diff = (ev_time () - start)*1000;
-			stat_aggregate_static (spc->statbase, BSS_SELECT_TIME_IDX0 + indexn, diff);
-			stat_collect_double (stat_base, SELECT_TIME, diff);
+			stat_aggregate_static (osp->statbase, BSS_SELECT_TIME_IDX0 + indexn, diff);
+			box_stat_collect_double (SELECT_TIME, diff);
 		}
 
 		//
 		// Статистика по кодам запросов
 		//
-		stat_collect (stat_base, _request->msg_code&0xffff, 1);
+		box_stat_collect (_request->msg_code&0xffff, 1);
 	}
-}
-
-#define foreach_op(...) for (int* op = (int[]){__VA_ARGS__, 0}; *op; ++op)
-
-void
-box_service (struct iproto_service* s)
-{
-	//
-	// Регистрируем обработчики выборок
-	//
-	foreach_op (NOP, SELECT, SELECT_LIMIT)
-		service_register_iproto (s, *op, box_select_cb, IPROTO_NONBLOCK);
-
-	//
-	// Регистрируем обработчики команд модификации данных
-	//
-	foreach_op (INSERT, UPDATE_FIELDS, DELETE, DELETE_1_3)
-		service_register_iproto(s, *op, box_cb, IPROTO_ON_MASTER);
-
-	//
-	// Регистрируем обработчики команд модификации мета-информации
-	//
-	foreach_op (CREATE_OBJECT_SPACE, CREATE_INDEX, DROP_OBJECT_SPACE, DROP_INDEX, TRUNCATE)
-		service_register_iproto(s, *op, box_meta_cb, IPROTO_ON_MASTER|IPROTO_WLOCK);
-
-#if CFG_lua_path || CFG_caml_path
-	//
-	// allow select only lua procedures updates are blocked by luaT_box_dispatch()
-	//
-	service_register_iproto (s, EXEC_LUA, box_proc_cb, 0);
-#endif
-}
-
-/**
- * @brief Обработчик изменений БД для сервиса только-чтение
- */
-static void
-box_roerr (struct netmsg_head* _h __attribute__((unused)), struct iproto* _request __attribute__((unused)))
-{
-	iproto_raise (ERR_CODE_NONMASTER, "updates are forbidden");
-}
-
-void
-box_service_ro (struct iproto_service* _s)
-{
-	service_register_iproto (_s, SELECT, box_select_cb, IPROTO_NONBLOCK);
-	service_register_iproto (_s, SELECT_LIMIT, box_select_cb, IPROTO_NONBLOCK);
-
-	foreach_op (INSERT, UPDATE_FIELDS, DELETE, DELETE_1_3, PAXOS_LEADER,
-				CREATE_OBJECT_SPACE, CREATE_INDEX, DROP_OBJECT_SPACE, DROP_INDEX, TRUNCATE)
-		service_register_iproto (_s, *op, box_roerr, IPROTO_NONBLOCK);
-
-#if CFG_lua_path || CFG_caml_path
-	//
-	// allow select only lua procedures updates are blocked by luaT_box_dispatch()
-	//
-	service_register_iproto (_s, EXEC_LUA, box_proc_cb, 0);
-#endif
-}
-
-void
-box_op_init (void)
-{
-	slab_cache_init (&phi_cache, sizeof(union box_phi_union), SLAB_GROW, "phi_cache");
-	stat_base = stat_register (box_ops, nelem (box_ops));
-	stat_named_base = stat_register_named ("box");
 }
 
 register_source ();
