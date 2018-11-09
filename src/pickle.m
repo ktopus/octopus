@@ -1,4 +1,3 @@
-// vim: set sts=8 sw=8 noexpandtab:
 /*
  * Copyright (C) 2010, 2011, 2012, 2013 Mail.RU
  * Copyright (C) 2010, 2011, 2012, 2013 Yuriy Vostrikov
@@ -24,7 +23,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
 #import <util.h>
 #import <fiber.h>
 #import <objc.h>
@@ -36,169 +34,178 @@
 #include <stdlib.h>
 
 void __attribute__((noreturn))
-tbuf_too_short()
+tbuf_too_short ()
 {
 	@throw [Error with_reason:"tbuf too short"];
 }
 
 void
-read_must_have(struct tbuf *b, i32 n)
+read_must_have (struct tbuf* _b, i32 _n)
 {
-	_read_must_have(b, n);
+	_read_must_have (_b, _n);
 }
 
 void
-read_must_end(struct tbuf *b, const char *err)
+read_must_end (struct tbuf* _b, const char* _e)
 {
-	if (unlikely(tbuf_len(b) != 0)) {
-		@throw [Error with_reason:(err ?: "tbuf not empty")];
-	}
+	if (unlikely (tbuf_len (_b) != 0))
+		@throw [Error with_reason:(_e ?: "tbuf not empty")];
 }
 
-/* caller must ensure that there is space in target */
-u8 *
-save_varint32(u8 *target, u32 value)
+u8*
+save_varint32 (u8* _p, u32 _v)
 {
-
-	if (value >= (1 << 7)) {
-		if (value >= (1 << 14)) {
-			if (value >= (1 << 21)) {
-				if (value >= (1 << 28))
-					*(target++) = (u8)(value >> 28) | 0x80;
-				*(target++) = (u8)(value >> 21) | 0x80;
+	if (_v >= (1 << 7))
+	{
+		if (_v >= (1 << 14))
+		{
+			if (_v >= (1 << 21))
+			{
+				if (_v >= (1 << 28))
+					*(_p++) = (u8)(_v >> 28) | 0x80;
+				*(_p++) = (u8)(_v >> 21) | 0x80;
 			}
-			*(target++) = (u8)((value >> 14) | 0x80);
+			*(_p++) = (u8)((_v >> 14) | 0x80);
 		}
-		*(target++) = (u8)((value >> 7) | 0x80);
+		*(_p++) = (u8)((_v >> 7) | 0x80);
 	}
-	*(target++) = (u8)((value) & 0x7F);
+	*(_p++) = (u8)((_v) & 0x7F);
 
-	return target;
-}
-
-inline static void
-append_byte(struct tbuf *b, u8 byte)
-{
-	*((u8 *)b->end++) = byte;
-	b->free--;
+	return _p;
 }
 
 void
-write_varint32(struct tbuf *b, u32 value)
+write_varint32 (struct tbuf* _b, u32 _v)
 {
-	tbuf_ensure(b, 5);
-	if (value >= (1 << 7)) {
-		if (value >= (1 << 14)) {
-			if (value >= (1 << 21)) {
-				if (value >= (1 << 28))
-					append_byte(b, (u8)(value >> 28) | 0x80);
-				append_byte(b, (u8)(value >> 21) | 0x80);
-			}
-			append_byte(b, (u8)((value >> 14) | 0x80));
-		}
-		append_byte(b, (u8)((value >> 7) | 0x80));
-	}
-	append_byte(b, (u8)((value) & 0x7F));
+	//
+	// Проверяем, что буфер имеет достаточно памяти для сохранения максимального
+	// значения числа. Памяти в буфере не достаточно, то буфер будет переаллоцирован
+	// с резервированием достаточного количества памяти
+	//
+	// Здесь можно было бы использовать varint32_sizeof вместо задания максимально
+	// возможного размера, однако это привело бы к дополнительным вычислениям при
+	// сомнительной экономии памяти
+	//
+	tbuf_ensure (_b, 5);
+
+	u8* end = save_varint32 (_b->end, _v);
+
+	_b->free -= end - (u8*)_b->end;
+	_b->end = end;
 }
 
 static u32
-_safe_load_varint32(struct tbuf *buf)
+_safe_load_varint32 (struct tbuf* _b)
 {
-	u8 *p = buf->ptr;
 	u32 v = 0;
-	for (;p < (u8*)buf->end && p - (u8*)buf->ptr < 5; v<<=7, p++) {
+
+	u8* p = _b->ptr;
+	for (; (p < (u8*)_b->end) && ((p - (u8*)_b->ptr) < 5); v <<= 7, ++p)
+	{
 		v |= *p & 0x7f;
-		if ((*p & 0x80) == 0) {
-			buf->ptr = p + 1;
+
+		if ((*p & 0x80) == 0)
+		{
+			_b->ptr = p + 1;
 			return v;
 		}
 	}
-	if (p == buf->end) {
-		tbuf_too_short();
-	}
-	if (v > ((u32)0xffffffff >> 7) || ((*p & 0x80) != 0)) {
-		raise_fmt("bad varint32");
-	}
+
+	if (p == _b->end)
+		tbuf_too_short ();
+
+	if ((v > ((u32)0xffffffff >> 7)) || ((*p & 0x80) != 0))
+		raise_fmt ("bad varint32");
+
 	v |= *p & 0x7f;
-	buf->ptr = p + 1;
+	_b->ptr = p + 1;
 	return v;
 }
 
-static __attribute__((always_inline)) inline u32
-safe_load_varint32(struct tbuf *buf)
+static inline u32
+safe_load_varint32 (struct tbuf* _b)
 {
-	u8 *p = buf->ptr;
-	if (buf->end > buf->ptr && (*p & 0x80) == 0) {
-		buf->ptr++;
+	u8* p = _b->ptr;
+	if ((_b->end > _b->ptr) && (*p & 0x80) == 0)
+	{
+		++_b->ptr;
 		return *p;
-	} else {
-		return _safe_load_varint32(buf);
 	}
+
+	return _safe_load_varint32 (_b);
 }
 
 u32
-read_varint32(struct tbuf *buf)
+read_varint32 (struct tbuf* _b)
 {
-	return safe_load_varint32(buf);
+	return safe_load_varint32 (_b);
 }
 
-void *
-read_field(struct tbuf *buf)
+void*
+read_field (struct tbuf* _b)
 {
-	void *p = buf->ptr;
-	u32 data_len = safe_load_varint32(buf);
-	buf->ptr += data_len;
-	if (unlikely(buf->ptr > buf->end)) {
-		buf->ptr = p;
-		tbuf_too_short();
+	void* p = _b->ptr;
+
+	_b->ptr += safe_load_varint32 (_b);
+	if (unlikely (_b->ptr > _b->end))
+	{
+		_b->ptr = p;
+		tbuf_too_short ();
 	}
 
 	return p;
 }
 
-void *
-read_bytes(struct tbuf *buf, u32 data_len)
+void*
+read_bytes (struct tbuf* _b, u32 _n)
 {
-	_read_must_have(buf, data_len);
-	void *p = buf->ptr;
-	buf->ptr += data_len;
+	_read_must_have (_b, _n);
+
+	void* p = _b->ptr;
+	_b->ptr += _n;
 	return p;
 }
 
 void
-read_to(struct tbuf *buf, void *p, u32 data_len)
+read_to (struct tbuf* _b, void* _p, u32 _n)
 {
-	_read_must_have(buf, data_len);
-	memcpy(p, buf->ptr, data_len);
-	buf->ptr += data_len;
+	_read_to (_b, _p, _n);
 }
 
-void *
-read_ptr(struct tbuf *buf)
+void*
+read_ptr (struct tbuf* _b)
 {
-	return *(void **)read_bytes(buf, sizeof(void *));
+	return *(void**)read_bytes (_b, sizeof (void*));
 }
 
-#define read_field_u(bits)						\
-	u##bits read_field_u##bits(struct tbuf *b)			\
-	{								\
-		_read_must_have(b, bits/8 + 1);				\
-		if (unlikely(*(u8*)b->ptr != bits/8))			\
-			raise_fmt("bad field");				\
-		u##bits r = *(u##bits *)(b->ptr + 1);			\
-		b->ptr += bits/8 + 1;					\
-		return r;						\
+/**
+ * @brief Шаблон функций чтения из буфера беззнаковых целых разной
+ *        битности записанных в виде пар {длина, значение}
+ */
+#define read_field_u(bits)                       \
+	u##bits read_field_u##bits (struct tbuf* _b) \
+	{                                            \
+		_read_must_have (_b, bits/8 + 1);        \
+		if (unlikely (*(u8*)_b->ptr != bits/8))  \
+			raise_fmt ("bad field");             \
+		u##bits r = *(u##bits*)(_b->ptr + 1);    \
+		_b->ptr += bits/8 + 1;                   \
+		return r;                                \
 	}
 
-#define read_field_i(bits)						\
-	i##bits read_field_i##bits(struct tbuf *b)			\
-	{								\
-		_read_must_have(b, bits/8 + 1);				\
-		if (unlikely(*(u8*)b->ptr != bits/8))			\
-			raise_fmt("bad field");				\
-		i##bits r = *(i##bits *)(b->ptr + 1);			\
-		b->ptr += bits/8 + 1;					\
-		return r;						\
+/**
+ * @brief Шаблон функций чтения из буфера целых со знаком разной
+ *        битности записанных в виде пар {длина, значение}
+ */
+#define read_field_i(bits)                      \
+	i##bits read_field_i##bits(struct tbuf* _b) \
+	{                                           \
+		_read_must_have (_b, bits/8 + 1);       \
+		if (unlikely (*(u8*)_b->ptr != bits/8)) \
+			raise_fmt ("bad field");            \
+		i##bits r = *(i##bits*)(_b->ptr + 1);   \
+		_b->ptr += bits/8 + 1;                  \
+		return r;                               \
 	}
 
 read_field_u(8)
@@ -210,56 +217,73 @@ read_field_i(16)
 read_field_i(32)
 read_field_i(64)
 
-struct tbuf *
-read_field_s(struct tbuf *b)
+struct tbuf*
+read_field_s (struct tbuf* _b)
 {
-	void *p = b->ptr;
-	u32 len = safe_load_varint32(b);
-	if (b->end - b->ptr < len) {
-		b->ptr = p;
-		tbuf_too_short();
+	void* p = _b->ptr;
+
+	u32 n = safe_load_varint32 (_b);
+	if ((_b->end - _b->ptr) < n)
+	{
+		_b->ptr = p;
+		tbuf_too_short ();
 	}
-	return tbuf_split(b, len);
+
+	return tbuf_split (_b, n);
 }
 
 size_t
-varint32_sizeof(u32 value)
+varint32_sizeof (u32 _v)
 {
 	int s = 1;
-	while (value >= 1 << 7) {
-		value >>= 7;
-		s++;
+
+	while (_v >= (1 << 7))
+	{
+		_v >>= 7;
+		++s;
 	}
+
 	return s;
 }
 
 u32
-_load_varint32(void **pp)
+_load_varint32 (void** _pp)
 {
-	u8 *p = *pp;
 	u32 v = 0;
-	do v = (v << 7) | (*p & 0x7f); while (*p++ & 0x80 && p - (u8 *)*pp < 5);
-	*pp = p;
+
+	u8* p = *_pp;
+	do
+		v = (v << 7) | (*p & 0x7f);
+	while ((*p++ & 0x80) && ((p - (u8 *)*_pp) < 5));
+	*_pp = p;
+
 	return v;
 }
 
-#define write_i(bits)							\
-	void write_i##bits(struct tbuf *b, i##bits i)			\
-	{								\
-		tbuf_ensure(b, bits/8);					\
-		*(i##bits *)b->end = i;					\
-		b->end += bits/8;					\
-		b->free -= bits/8;					\
+/**
+ * @brief Шаблон функций записи в буфер целого со знаком
+ */
+#define write_i(bits)                                \
+	void write_i##bits (struct tbuf* _b, i##bits _v) \
+	{                                                \
+		tbuf_ensure (_b, bits/8);                    \
+		*(i##bits*)_b->end = _v;                     \
+		_b->end  += bits/8;                          \
+		_b->free -= bits/8;                          \
 	}
 
-#define write_field_i(bits)						\
-	void write_field_i##bits(struct tbuf *b, i##bits i)		\
-	{								\
-		tbuf_ensure(b, bits/8 + 1);				\
-		*(u8*)b->end = bits/8;					\
-		*(i##bits *)(b->end+1) = i;				\
-		b->end += bits/8 + 1;					\
-		b->free -= bits/8 + 1;					\
+/**
+ * @brief Шаблон функции записи в буфер целого со знаком в виде
+ *        пары {длина, значение}
+ */
+#define write_field_i(bits)                                \
+	void write_field_i##bits (struct tbuf* _b, i##bits _v) \
+	{                                                      \
+		tbuf_ensure (_b, bits/8 + 1);                      \
+		*(u8*)_b->end = bits/8;                            \
+		*(i##bits*)(_b->end + 1) = _v;                     \
+		_b->end  += bits/8 + 1;                            \
+		_b->free -= bits/8 + 1;                            \
 	}
 
 write_i(8)
@@ -272,10 +296,10 @@ write_field_i(32)
 write_field_i(64)
 
 void
-write_field_s(struct tbuf *b, const u8* s, u32 l)
+write_field_s (struct tbuf* _b, const u8* _s, u32 _n)
 {
-	write_varint32(b, l);
-	tbuf_append(b, s, l);
+	write_varint32 (_b, _n);
+	tbuf_append (_b, _s, _n);
 }
 
-register_source();
+register_source ();
