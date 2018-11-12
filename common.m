@@ -123,7 +123,7 @@ box_stat_sum_named (const char* _name, int _n, double _v)
 }
 
 void
-box_stat_aggregate_named(const char* _name, int _n, double _v)
+box_stat_aggregate_named (const char* _name, int _n, double _v)
 {
 	stat_aggregate_named (g_stat_named_base, _name, _n, _v);
 }
