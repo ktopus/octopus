@@ -211,13 +211,15 @@ void object_space_fill_stat_names (struct object_space* _osp);
  */
 void object_space_clear_stat_names (struct object_space* _osp);
 
+/**
+ * @name Врапперы для соответствующих функций сбора статистики
+ */
+/** {*/
 void box_stat_collect (int _name, i64 _v);
-
 void box_stat_collect_double (int _name, double _v);
-
 void box_stat_sum_named (char const* _name, int _n, double _v);
-
 void box_stat_aggregate_named (char const* _name, int _n, double _v);
+/** @}*/
 
 /**
  * @brief Инициализация сбора статистики
