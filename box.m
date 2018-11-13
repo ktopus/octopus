@@ -645,7 +645,7 @@ configure_pk (Box* _box)
 			panic ("(object_space = %" PRIu32 ") at least one index must be defined", i);
 
 		//
-		// Созщдаём первичный индекс для таблицы
+		// Создаём первичный индекс для таблицы
 		//
 		osp->index[0] = configure_index (i, 0, NULL);
 
@@ -1097,9 +1097,8 @@ prepare_tlv (struct box_txn* _tx, const struct tlv* _tlv)
 		//
 		// Неизвестные команды просто пропускаем
 		//
-		// FIXME: может выводить здесь диагностику?
-		//
 		default:
+			say_error ("Unknown command in prepare_tlv: %d", _tlv->tag);
 			break;
 	}
 }
