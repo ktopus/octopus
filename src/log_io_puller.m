@@ -419,11 +419,6 @@ recv
 	tbuf_ensure (&rbuf, 256*1024);
 
 	ssize_t r = [self recv_with_timeout: cfg.wal_feeder_keepalive_timeout];
-
-	//
-	// FIXME: при задании здесь <= в тесте 40.2 сервер выходит с сообщением
-	//        "unexpected EOF"
-	//
 	if (r <= 0)
 	{
 		switch (r)
