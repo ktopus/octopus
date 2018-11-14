@@ -399,7 +399,7 @@ box_commit_meta (struct box_meta_txn* _tx)
 			break;
 
 		case TRUNCATE:
-			say_info ("DROP object_space n:%i", _tx->object_space->n);
+			say_info ("TRUNCATE object_space n:%i", _tx->object_space->n);
 
 			//
 			// Проходим по первичному индексу
