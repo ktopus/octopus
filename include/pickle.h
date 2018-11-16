@@ -171,6 +171,16 @@ i64 read_field_i64 (struct tbuf* _b);
 struct tbuf* read_field_s (struct tbuf* _b);
 
 /**
+ * @name Запись в буфер целых без знака разной битности
+ */
+/** @{*/
+void write_u8  (struct tbuf* _b, u8  _v);
+void write_u16 (struct tbuf* _b, u16 _v);
+void write_u32 (struct tbuf* _b, u32 _v);
+void write_u64 (struct tbuf* _b, u64 _v);
+/** @}*/
+
+/**
  * @name Запись в буфер целых со знаком разной битности
  */
 /** @{*/

@@ -261,6 +261,18 @@ _load_varint32 (void** _pp)
 }
 
 /**
+ * @brief Шаблон функций записи в буфер целого без знака
+ */
+#define write_u(bits)                                \
+	void write_u##bits (struct tbuf* _b, u##bits _v) \
+	{                                                \
+		tbuf_ensure (_b, bits/8);                    \
+		*(u##bits*)_b->end = _v;                     \
+		_b->end  += bits/8;                          \
+		_b->free -= bits/8;                          \
+	}
+
+/**
  * @brief Шаблон функций записи в буфер целого со знаком
  */
 #define write_i(bits)                                \
@@ -286,6 +298,10 @@ _load_varint32 (void** _pp)
 		_b->free -= bits/8 + 1;                            \
 	}
 
+write_u(8)
+write_u(16)
+write_u(32)
+write_u(64)
 write_i(8)
 write_i(16)
 write_i(32)
