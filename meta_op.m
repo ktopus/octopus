@@ -246,7 +246,7 @@ prepare_drop_index (struct box_meta_txn* _tx, struct tbuf* _data)
 }
 
 void
-box_prepare_meta (struct box_meta_txn* _tx, struct tbuf* _data)
+box_meta_prepare (struct box_meta_txn* _tx, struct tbuf* _data)
 {
 	//
 	// Таблица для модификации
@@ -309,7 +309,7 @@ link_index (struct object_space* _osp)
 }
 
 void
-box_commit_meta (struct box_meta_txn* _tx)
+box_meta_commit (struct box_meta_txn* _tx)
 {
 	id<BasicIndex> pk = _tx->object_space->index[0];
 
@@ -433,7 +433,7 @@ box_commit_meta (struct box_meta_txn* _tx)
 }
 
 void
-box_rollback_meta (struct box_meta_txn* _tx)
+box_meta_rollback (struct box_meta_txn* _tx)
 {
 	switch (_tx->op)
 	{
@@ -485,13 +485,14 @@ box_meta_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 	//
 	// Создаём мета-транзакцию
 	//
-	struct box_meta_txn txn = {.op = _request->msg_code, .box = box};
+	struct box_meta_txn tx = {.op = _request->msg_code, .box = box};
+
 	@try
 	{
 		//
 		// Выполняем мета-команду
 		//
-		box_prepare_meta (&txn, &TBUF (_request->data, _request->data_len, NULL));
+		box_meta_prepare (&tx, &TBUF (_request->data, _request->data_len, NULL));
 
 		//
 		// Записываем изменения в журнал
@@ -507,7 +508,7 @@ box_meta_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 		//
 		// В случае ошибок откатываем транзакцию
 		//
-		box_rollback_meta (&txn);
+		box_meta_rollback (&tx);
 		@throw;
 	}
 
@@ -516,7 +517,7 @@ box_meta_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 		//
 		// Подтверждаем выполнение команды
 		//
-		box_commit_meta (&txn);
+		box_meta_commit (&tx);
 
 		iproto_reply_small (_wbuf, _request, ERR_CODE_OK);
 	}

@@ -72,17 +72,17 @@ struct box_meta_txn
  * выполнения изменения и запоминаем необходимые параметры (возможно с
  * предварительным созданием заготовки объекта)
  */
-void box_prepare_meta (struct box_meta_txn* _tx, struct tbuf* _data);
+void box_meta_prepare (struct box_meta_txn* _tx, struct tbuf* _data);
 
 /**
  * @brief Подтвердить изменения в структуре
  */
-void box_commit_meta (struct box_meta_txn* _tx);
+void box_meta_commit (struct box_meta_txn* _tx);
 
 /**
  * @brief Откатить изменения в структуре
  */
-void box_rollback_meta (struct box_meta_txn* _tx);
+void box_meta_rollback (struct box_meta_txn* _tx);
 
 /**
  * @brief Обработчик команд изменения мета-информации
