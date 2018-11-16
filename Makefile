@@ -32,6 +32,7 @@ obj += mod/box/src-lua/box/loop.o
 obj += mod/box/src-lua/box/expire.o
 obj += mod/box/src-lua/box/dyn_tuple.o
 obj += mod/box/src-lua/box/op.o
+obj += mod/box/src-lua/box/meta_op.o
 obj += mod/box/src-lua/box/string_ext.o
 obj += mod/box/src-lua/box/cast.o
 endif

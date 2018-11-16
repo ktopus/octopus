@@ -245,6 +245,113 @@ prepare_drop_index (struct box_meta_txn* _tx, struct tbuf* _data)
 		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "attemp to drop non existent index");
 }
 
+int
+box_meta_truncate (int _shard_id, int _n)
+{
+	struct tnt_object* obj = NULL;
+
+	say_info ("TRUNCATE shard_id:%i object_space n:%i", _shard_id, _n);
+
+	//
+	// Проверяем допустимость индекса шарда
+	//
+	if ((_shard_id < 0) || (_shard_id >= nelem (shard_rt)))
+		return -1;
+
+	//
+	// Шард
+	//
+	Shard<Shard>* shard = shard_rt[_shard_id].shard;
+	if (shard == NULL)
+		return -2;
+
+	//
+	// Для реплик изменение мета-информации не поддерживается
+	//
+	if ([shard is_replica])
+		return -3;;
+
+	//
+	// Модуль
+	//
+	Box* box = shard->executor;
+	if (box == NULL)
+		return -4;
+
+	//
+	// Таблица
+	//
+	struct object_space* osp = object_space (box, _n);
+	if (osp == NULL)
+		return -5;
+
+	//
+	// Записываем изменения в журнал
+	//
+	{
+		//
+		// Пакуем параметры команды в буфер
+		//
+		// Используем функции упаковки вместо простого сохранения в массив
+		// чтобы гарантировать, что при чтении с помощью функций read_u32
+		// данные будут корректно распакованы
+		//
+		u32 data[/*_n*/sizeof (u32) + /*flags*/sizeof (u32)] = {0};
+		struct tbuf buf = TBUF_BUF (data);
+		write_u32 (&buf, _n);
+		write_u32 (&buf,  0);
+
+		//
+		// Пишем буфер в журнал
+		//
+		if ([box->shard submit:buf.ptr len:tbuf_len (&buf) tag:(TRUNCATE<<5)|TAG_WAL] != 1)
+		{
+			box_stat_collect (SUBMIT_ERROR, 1);
+			return -6;
+		}
+	}
+
+	//
+	// Первичный индекс
+	//
+	id<BasicIndex> pk = osp->index[0];
+
+	//
+	// Счётчик удалённых записей
+	//
+	int count = 0;
+
+	//
+	// Проходим по первичному индексу
+	//
+	[pk iterator_init];
+	while ((obj = [pk iterator_next]))
+	{
+		//
+		// Объект должен представлять собой обычную запись
+		//
+		assert (tuple_visible_left (obj) == obj);
+
+		//
+		//  Удаляем запись из памяти
+		//
+		tuple_free (obj);
+
+		//
+		// Считаем удалённые объекты
+		//
+		++count;
+	}
+
+	//
+	// Проходим по всем индексам и очищаем их
+	//
+	foreach_index (index, osp)
+		[index clear];
+
+	return count;
+}
+
 void
 box_meta_prepare (struct box_meta_txn* _tx, struct tbuf* _data)
 {
@@ -493,7 +600,7 @@ box_meta_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 	@try
 	{
 		//
-		// Выполняем мета-команду
+		// Подготовка выполнения мета-команды
 		//
 		box_meta_prepare (&tx, &TBUF (_request->data, _request->data_len, NULL));
 
