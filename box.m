@@ -1173,12 +1173,12 @@ apply:(struct tbuf*)_data tag:(u16)_tag
 
 		@try
 		{
-			box_prepare_meta (&tx, _data);
-			box_commit_meta  (&tx);
+			box_meta_prepare (&tx, _data);
+			box_meta_commit  (&tx);
 		}
 		@catch (id e)
 		{
-			box_rollback_meta (&tx);
+			box_meta_rollback (&tx);
 			@throw;
 		}
 
