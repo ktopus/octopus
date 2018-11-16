@@ -468,24 +468,27 @@ box_meta_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 	Box* box = (shard_rt + _request->shard_id)->shard->executor;
 
 	//
+	// Создаём мета-транзакцию
+	//
+	struct box_meta_txn tx = {.op = _request->msg_code, .box = box};
+
+	//
 	// Для реплик изменение мета-информации не поддерживается
 	//
 	if ([box->shard is_replica])
 		iproto_raise (ERR_CODE_NONMASTER, "replica is readonly");
 
-	if (box->shard->dummy)
+	//
+	// Блокируем изменение метаданных для сконфигурированных пространств имён
+	//
+	if (box->shard->dummy  && (tx.op != TRUNCATE))
 		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "metadata updates are forbidden because cfg.object_space is configured");
 
 	//
 	// Если мета-информация задана в конфигурации, то её изменение не поддерживается
 	//
-	if (cfg.object_space)
+	if (cfg.object_space  && (tx.op != TRUNCATE))
 		say_warn ("metadata updates with configured cfg.object_space");
-
-	//
-	// Создаём мета-транзакцию
-	//
-	struct box_meta_txn tx = {.op = _request->msg_code, .box = box};
 
 	@try
 	{
