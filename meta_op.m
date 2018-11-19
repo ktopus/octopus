@@ -245,76 +245,19 @@ prepare_drop_index (struct box_meta_txn* _tx, struct tbuf* _data)
 		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "attemp to drop non existent index");
 }
 
-int
-box_meta_truncate (int _shard_id, int _n)
+/**
+ * @brief Удалить все данные из заданной таблицы
+ */
+static int
+box_meta_truncate_osp (struct object_space* _osp)
 {
 	struct tnt_object* obj = NULL;
 
-	say_info ("TRUNCATE shard_id:%i object_space n:%i", _shard_id, _n);
-
 	//
-	// Проверяем допустимость индекса шарда
+	// Первичный индекс, по которому делаем проход для удаления
+	// записей
 	//
-	if ((_shard_id < 0) || (_shard_id >= nelem (shard_rt)))
-		return -1;
-
-	//
-	// Шард
-	//
-	Shard<Shard>* shard = shard_rt[_shard_id].shard;
-	if (shard == NULL)
-		return -2;
-
-	//
-	// Для реплик изменение мета-информации не поддерживается
-	//
-	if ([shard is_replica])
-		return -3;;
-
-	//
-	// Модуль
-	//
-	Box* box = shard->executor;
-	if (box == NULL)
-		return -4;
-
-	//
-	// Таблица
-	//
-	struct object_space* osp = object_space (box, _n);
-	if (osp == NULL)
-		return -5;
-
-	//
-	// Записываем изменения в журнал
-	//
-	{
-		//
-		// Пакуем параметры команды в буфер
-		//
-		// Используем функции упаковки вместо простого сохранения в массив
-		// чтобы гарантировать, что при чтении с помощью функций read_u32
-		// данные будут корректно распакованы
-		//
-		u32 data[/*_n*/sizeof (u32) + /*flags*/sizeof (u32)] = {0};
-		struct tbuf buf = TBUF_BUF (data);
-		write_u32 (&buf, _n);
-		write_u32 (&buf,  0);
-
-		//
-		// Пишем буфер в журнал
-		//
-		if ([box->shard submit:buf.ptr len:tbuf_len (&buf) tag:(TRUNCATE<<5)|TAG_WAL] != 1)
-		{
-			box_stat_collect (SUBMIT_ERROR, 1);
-			return -6;
-		}
-	}
-
-	//
-	// Первичный индекс
-	//
-	id<BasicIndex> pk = osp->index[0];
+	id<BasicIndex> pk = _osp->index[0];
 
 	//
 	// Счётчик удалённых записей
@@ -346,10 +289,87 @@ box_meta_truncate (int _shard_id, int _n)
 	//
 	// Проходим по всем индексам и очищаем их
 	//
-	foreach_index (index, osp)
+	foreach_index (index, _osp)
 		[index clear];
 
 	return count;
+}
+
+int
+box_meta_truncate (int _shard_id, int _n)
+{
+	say_info ("TRUNCATE shard_id:%i object_space n:%i", _shard_id, _n);
+
+	//
+	// Удаление данных из таблицы не может выполняться в процессе выполнения
+	// транзакции по изменению данных
+	//
+	if (fiber->txn != NULL)
+		return -1;
+
+	//
+	// Проверяем допустимость индекса шарда
+	//
+	if ((_shard_id < 0) || (_shard_id >= nelem (shard_rt)))
+		return -2;
+
+	//
+	// Шард
+	//
+	Shard<Shard>* shard = shard_rt[_shard_id].shard;
+	if (shard == NULL)
+		return -3;
+
+	//
+	// Для реплик изменение мета-информации не поддерживается
+	//
+	if ([shard is_replica])
+		return -4;
+
+	//
+	// Модуль
+	//
+	Box* box = shard->executor;
+	if (box == NULL)
+		return -5;
+
+	//
+	// Таблица
+	//
+	struct object_space* osp = object_space (box, _n);
+	if (osp == NULL)
+		return -6;
+
+	//
+	// Записываем изменения в журнал
+	//
+	{
+		//
+		// Пакуем параметры команды в буфер
+		//
+		// Используем функции упаковки вместо простого сохранения в массив
+		// чтобы гарантировать, что при чтении с помощью функций read_u32
+		// данные будут корректно распакованы
+		//
+		u32 data[/*_n*/sizeof (u32) + /*flags*/sizeof (u32)] = {0};
+		struct tbuf buf = TBUF_BUF (data);
+		write_u32 (&buf, _n);
+		write_u32 (&buf,  0);
+
+		//
+		// Пишем буфер в журнал
+		//
+		if ([box->shard submit:buf.ptr len:tbuf_len (&buf) tag:(TRUNCATE<<5)|TAG_WAL] != 1)
+		{
+			box_stat_collect (SUBMIT_ERROR, 1);
+			return -7;
+		}
+	}
+
+	//
+	// Удаляем все данные из таблицы
+	//
+	return box_meta_truncate_osp (osp);
 }
 
 void
@@ -418,9 +438,6 @@ link_index (struct object_space* _osp)
 void
 box_meta_commit (struct box_meta_txn* _tx)
 {
-	id<BasicIndex> pk = _tx->object_space->index[0];
-
-	struct tnt_object* obj;
 	switch (_tx->op)
 	{
 		case CREATE_OBJECT_SPACE:
@@ -466,21 +483,9 @@ box_meta_commit (struct box_meta_txn* _tx)
 			say_info ("DROP object_space n:%i", _tx->object_space->n);
 
 			//
-			// Проходим по первичному индексу
+			// Удаляем данные из таблицы
 			//
-			[pk iterator_init];
-			while ((obj = [pk iterator_next]))
-			{
-				//
-				// Объект должен представлять собой обычную запись
-				//
-				assert (tuple_visible_left (obj) == obj);
-
-				//
-				//  Удаляем запись из памяти
-				//
-				tuple_free (obj);
-			}
+			box_meta_truncate_osp (_tx->object_space);
 
 			//
 			// Проходим по всему массиву индексов и удаляем их
@@ -492,7 +497,7 @@ box_meta_commit (struct box_meta_txn* _tx)
 			}
 
 			//
-			// Удаляем таблицу из массива
+			// Удаляем таблицу из списка
 			//
 			_tx->box->object_space_registry[_tx->object_space->n] = NULL;
 			//
@@ -500,7 +505,7 @@ box_meta_commit (struct box_meta_txn* _tx)
 			//
 			object_space_clear_stat_names (_tx->object_space);
 			//
-			// Окончательно очищаем память, которую занимает таблица
+			// Окончательно очищаем память, которую занимала таблица
 			//
 			free (_tx->object_space);
 			break;
@@ -509,27 +514,9 @@ box_meta_commit (struct box_meta_txn* _tx)
 			say_info ("TRUNCATE object_space n:%i", _tx->object_space->n);
 
 			//
-			// Проходим по первичному индексу
+			// Удаляем данные из таблицы
 			//
-			[pk iterator_init];
-			while ((obj = [pk iterator_next]))
-			{
-				//
-				// Объект должен представлять собой обычную запись
-				//
-				assert (tuple_visible_left (obj) == obj);
-
-				//
-				//  Удаляем запись из памяти
-				//
-				tuple_free (obj);
-			}
-
-			//
-			// Проходим по всем индексам и очищаем их
-			//
-			foreach_index (index, _tx->object_space)
-				[index clear];
+			box_meta_truncate_osp (_tx->object_space);
 			break;
 
 		default:
