@@ -518,6 +518,15 @@ box_version ()
 	return shard_box ()->version;
 }
 
+int
+box_shard_id (Box* _box)
+{
+	if (_box == NULL)
+		return -1;
+
+	return _box->shard->id;
+}
+
 struct object_space*
 object_space (Box* _box, int _n)
 {

@@ -101,11 +101,6 @@ void snap_insert_row (struct object_space* _osp, size_t _cardinality, const void
 @end
 
 /**
- * @brief Таблица с заданным номером
- */
-struct object_space* object_space (Box* box, int n);
-
-/**
  * @brief Модуль, для которого выполняется транзакция
  */
 Box* shard_box ();
@@ -119,6 +114,16 @@ int shard_box_id ();
  * @brief Версия модуля
  */
 int box_version ();
+
+/**
+ * @brief Идентификатор данного модуля
+ */
+int box_shard_id (Box* _box);
+
+/**
+ * @brief Таблица с заданным номером
+ */
+struct object_space* object_space (Box* _box, int n);
 
 /**
  * @brief Аргументы операции вывода дубликатов

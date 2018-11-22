@@ -1,9 +1,16 @@
-local ffi = require ('ffi')
+local box = require ("box")
+local ffi = require ("ffi")
+
+local tonumber = tonumber
+local print    = print
+
+user_proc = user_box or {}
+local user_proc = user_proc
 
 module (...)
 
 ffi.cdef [[
-	int box_meta_truncate (int _shard_id, int _n);
+	int box_meta_truncate (int _id, int _n);
 ]]
 
 --
@@ -12,27 +19,32 @@ ffi.cdef [[
 -- @param[in] _id числовой идентификатор шарда
 -- @param[in] _n числовой идентификатор таблицы
 --
--- @return -1 - открыта транзакция изменения данных, очистка таблицы невозможна;
---         -2 - индекс шарда вне допустимого диапазона;
---         -3 - шард с заданным индексом отсутствует;
---         -4 - шард является репликой;
---         -5 - с шардом не связан модуль;
+-- @return -1 - выполняется транзакция модификации данных;
+--         -2 - идентификатор шарда вне диапазона;
+--         -3 - шарда с заданным идентификатором не существует;
+--         -4 - с заданным шардом не связан никакой модуль;
+--         -5 - шард является репликой;
 --         -6 - в шарде отсутствует таблица с заданным индексом;
 --         -7 - не удалось сохранить запись об изменениях в журнал;
 --         -8 - идентификатор шарда не является числом;
---         -9 - идентификатор таблицы не является числом;
+--         -9 - номер таблицы не является числом
 --         0...n - число удалённых из таблицы записей
 --
-function truncate (_id, _n)
-	_id = tonumber (_id);
-	_n  = tonumber (_n);
+-- Данную функцию можно вызывать только из административного LUA-интерфейса,
+-- вне транзакции изменения данных
+--
+function meta_truncate (_id, _n)
+	print ("truncate from " .. _id .. "/" .. _n)
 
-	if (_id == nil) then
-		return -8;
-	end;
-	if (_n == nil) then
-		return -9;
-	end;
+	_id = tonumber (_id)
+	if _id == nul then
+		return -8
+	end
 
-	return ffi.C.box_meta_truncate (_id, _n);
+	_n = tonumber (_n)
+	if _n == nul then
+		return -9
+	end
+
+	return ffi.C.box_meta_truncate (_id, _n)
 end

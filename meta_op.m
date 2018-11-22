@@ -296,41 +296,46 @@ box_meta_truncate_osp (struct object_space* _osp)
 }
 
 int
-box_meta_truncate (int _shard_id, int _n)
+box_meta_truncate (int _id, int _n)
 {
-	say_info ("TRUNCATE shard_id:%i object_space n:%i", _shard_id, _n);
+	say_info ("TRUNCATE shard_id:%i object_space n:%i", _id, _n);
 
 	//
-	// Удаление данных из таблицы не может выполняться в процессе выполнения
-	// транзакции по изменению данных
+	// Удаление данных с помощью данной процедуры необходимо выполнять
+	// вне транзакции модификации данных
+	//
+	// Таким образом данную функцию можно вызывать только из LUA-поцедур,
+	// которые выполняются через административный telnet-интерфейс. Таким
+	// образом мы гарантируем целостность данных
+	//
+	// FIXME: отключено для отладки
 	//
 	if (fiber->txn != NULL)
 		return -1;
 
 	//
-	// Проверяем допустимость индекса шарда
+	// Проверяем корректность идентификатора шарда
 	//
-	if ((_shard_id < 0) || (_shard_id >= nelem (shard_rt)))
+	if ((_id < 0) || (_id >= nelem (shard_rt)))
 		return -2;
 
 	//
-	// Шард
+	// Проверяем, что шард с заданным идентификатором корректен
 	//
-	Shard<Shard>* shard = shard_rt[_shard_id].shard;
-	if (shard == NULL)
+	if (shard_rt[_id].shard == NULL)
 		return -3;
+
+	//
+	// Модуль для заданного шарда
+	//
+	Box* box = shard_rt[_id].shard->executor;
+	if (box == NULL)
+		return -4;
 
 	//
 	// Для реплик изменение мета-информации не поддерживается
 	//
-	if ([shard is_replica])
-		return -4;
-
-	//
-	// Модуль
-	//
-	Box* box = shard->executor;
-	if (box == NULL)
+	if ([box->shard is_replica])
 		return -5;
 
 	//
@@ -557,9 +562,16 @@ box_meta_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 	say_debug2 ("%s: op:0x%02x sync:%u", __func__, _request->msg_code, _request->sync);
 
 	//
+	// Выполнение мета-команд необходимо выполнять вне транзакции модификации
+	// данных. В текущей реализации это программная ошибка, создать такую
+	// ситуацию через интерфейс должно быть невозможно
+	//
+	assert (fiber->txn == NULL);
+
+	//
 	// Модуль, для которого вызвана процедура изменения мета-информации
 	//
-	Box* box = (shard_rt + _request->shard_id)->shard->executor;
+	Box* box = shard_rt[_request->shard_id].shard->executor;
 
 	//
 	// Создаём мета-транзакцию

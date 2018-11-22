@@ -1,0 +1,24 @@
+# box.insert([1, 2, "abc", "def"])
+1
+
+# box.select(1, 2)
+[["\x01\x00\x00\x00", "\x02\x00\x00\x00", "abc", "def"]]
+
+# box.lua("user_proc.truncate", "0")
+[]
+
+# box.select(1, 2)
+[]
+
+# box.insert([2, 3, "klm", "xyz"])
+1
+
+# box.select(1, 2)
+[["\x02\x00\x00\x00", "\x03\x00\x00\x00", "klm", "xyz"]]
+
+# box.truncate()
+:success
+
+# box.select(1, 2)
+[]
+
