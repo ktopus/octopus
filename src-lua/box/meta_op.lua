@@ -48,3 +48,8 @@ function meta_truncate (_id, _n)
 
 	return ffi.C.box_meta_truncate (_id, _n)
 end
+
+--
+-- Запоминаем функцию в глобальной таблице для её вызова через интерфейс
+--
+user_proc.meta_truncate = meta_truncate

@@ -298,7 +298,7 @@ box_meta_truncate_osp (struct object_space* _osp)
 int
 box_meta_truncate (int _id, int _n)
 {
-	say_info ("TRUNCATE shard_id:%i object_space n:%i", _id, _n);
+	say_info ("TRUNCATE shard id:%i object_space n:%i", _id, _n);
 
 	//
 	// Удаление данных с помощью данной процедуры необходимо выполнять
