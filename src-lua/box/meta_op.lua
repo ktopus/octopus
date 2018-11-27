@@ -37,12 +37,12 @@ function meta_truncate (_id, _n)
 	print ("truncate from " .. _id .. "/" .. _n)
 
 	_id = tonumber (_id)
-	if _id == nul then
+	if _id == nil then
 		return -8
 	end
 
 	_n = tonumber (_n)
-	if _n == nul then
+	if _n == nil then
 		return -9
 	end
 
