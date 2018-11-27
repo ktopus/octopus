@@ -3,25 +3,25 @@
 $: << File.dirname($0) + '/lib'
 require 'run_env'
 
-class Env < RunEnv
-  def config
-	super + <<EOD
+class NormalEnv < RunEnv
+	def config
+		super + <<EOD
 
 admin_exec_lua = 0
 EOD
-  end
+	end
 end
 
-class EnvAdmin < RunEnv
-  def config
-	super + <<EOD
+class AdminEnv < RunEnv
+	def config
+		super + <<EOD
 
 admin_exec_lua = 1
 EOD
-  end
+	end
 end
 
-Env.env_eval do
+NormalEnv.env_eval do
 	start
 
 	c = connect
@@ -60,7 +60,7 @@ Env.env_eval do
 	c.select 1, 2, 3
 end
 
-EnvAdmin.env_eval do
+AdminEnv.env_eval do
 	start
 
 	c = connect
