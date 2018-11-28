@@ -58,7 +58,7 @@ struct twlpage_t {
 };
 
 #define TWLPAGEHDRSZ	(offsetof(twlpage_t, data))
-#define TUPITH(tt, page, i)	((page)->data + ((tt)->sizeof_tuple_key * (i))) 
+#define TUPITH(tt, page, i)	((page)->data + ((tt)->sizeof_tuple_key * (i)))
 #define TUPMOVE(tt, page, to, from, cnt) do { \
 	memmove(TUPITH((tt), (page), (to)), TUPITH((tt), (page), (from)), (cnt) * (tt)->sizeof_tuple_key); \
 } while(0)
@@ -155,7 +155,7 @@ twltree_init(twltree_t *tt) {
 	memset(tt->search_index_key, 0, index_key_alloc * 3);
 	tt->stored_index_key = (index_key_t*)((char*)tt->search_index_key + index_key_alloc);
 	tt->firstpage = (index_key_t*)((char*)tt->stored_index_key + index_key_alloc);
-		 
+
 	tt->firstpage->page = twltree_new_page(tt, next_size(tt, 0, 1));
 	if (tt->firstpage->page == NULL) {
 		tt->tlrealloc(tt->search_index_key, 0);
@@ -865,7 +865,6 @@ twltree_delete(twltree_t *tt, void *tuple_key) {
 		if (tt->firstpage->page != s.page || s.page->right != NULL)
 			twltree_free_page(tt, s.key);
 		else {
-			assert(s.key == tt->firstpage);
 			free_index_key(tt, s.key);
 			s.page->n_tuple_keys = 0;
 		}
