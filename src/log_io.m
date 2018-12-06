@@ -806,35 +806,70 @@ marker_desc
 @implementation XLog11
 - (u32) version { return 11; }
 
-struct tbuf *
-convert_row_v11_to_v12(struct tbuf *m)
+struct tbuf*
+convert_row_v11_to_v12 (struct tbuf* _v11)
 {
-	struct tbuf *n = tbuf_alloc(m->pool);
-	tbuf_append(n, NULL, sizeof(struct row_v12));
-	row_v12(n)->scn = row_v12(n)->lsn = _row_v11(m)->lsn;
-	row_v12(n)->tm = _row_v11(m)->tm;
-	row_v12(n)->len = _row_v11(m)->len - sizeof(u16) - sizeof(u64); /* tag & cookie */
+	struct tbuf* v12 = tbuf_alloc (_v11->pool);
 
-	tbuf_ltrim(m, sizeof(struct _row_v11));
+	//
+	// Смещаем указатель в буфера за заголовок
+	//
+	tbuf_append (v12, NULL, sizeof (struct row_v12));
+	//
+	// Очищаем данные заголовка
+	//
+	bzero (row_v12 (v12), sizeof (struct row_v12));
 
-	u16 tag = read_u16(m);
-	if (tag == (u16)-1) {
-		row_v12(n)->tag = snap_data|TAG_SNAP;
-	} else if (tag == (u16)-2) {
-		row_v12(n)->tag = wal_data|TAG_WAL;
-	} else {
-		say_error("unknown tag %i", (int)tag);
+	row_v12 (v12)->scn = _row_v11 (_v11)->lsn;
+	row_v12 (v12)->lsn = _row_v11 (_v11)->lsn;
+	row_v12 (v12)->tm  = _row_v11 (_v11)->tm;
+	row_v12 (v12)->len = _row_v11 (_v11)->len - sizeof (u16) - sizeof (u64); /* tag & cookie */
+
+	//
+	// Переходим к данным в исходном буфере
+	//
+	tbuf_ltrim (_v11, sizeof (struct _row_v11));
+
+	//
+	// Восстанавливаем тэг записи
+	//
+	u16 tag = read_u16 (_v11);
+	if (tag == (u16)-1)
+	{
+		row_v12 (v12)->tag = snap_data|TAG_SNAP;
+	}
+	else if (tag == (u16)-2)
+	{
+		row_v12 (v12)->tag = wal_data|TAG_WAL;
+	}
+	else
+	{
+		say_error ("unknown tag %i", (int)tag);
 		return NULL;
 	}
 
-	(void)read_u64(m); /* ignore cookie */
-	tbuf_append(n, m->ptr, row_v12(n)->len);
+	//
+	// Пропускаем куку
+	//
+	(void)read_u64 (_v11);
 
-	row_v12(n)->data_crc32c = crc32c(0, m->ptr, row_v12(n)->len);
-	row_v12(n)->header_crc32c = crc32c(0, n->ptr + field_sizeof(struct row_v12, header_crc32c),
-					   sizeof(struct row_v12) - field_sizeof(struct row_v12, header_crc32c));
+	//
+	// Оставшиеся данные переписываем в итоговый буфер
+	//
+	tbuf_append (v12, _v11->ptr, row_v12 (v12)->len);
 
-	return n;
+	//
+	// CRC32 блока данных
+	//
+	row_v12(v12)->data_crc32c = crc32c (0, _v11->ptr, row_v12 (v12)->len);
+
+	//
+	// CRC32 заголовка
+	//
+	row_v12(v12)->header_crc32c = crc32c (0, v12->ptr + field_sizeof (struct row_v12, header_crc32c),
+											 sizeof (struct row_v12) - field_sizeof (struct row_v12, header_crc32c));
+
+	return v12;
 }
 
 - (int)
@@ -849,62 +884,105 @@ write_header:(const i64 *)shard_scn_map
 	return 0;
 }
 
-- (struct row_v12 *)
+-(struct row_v12*)
 read_row
 {
-	struct tbuf *m = tbuf_alloc(fiber->pool);
+	struct tbuf* v11 = tbuf_alloc (fiber->pool);
 
-	u32 header_crc, data_crc;
+	u32 data_crc;
 
-	tbuf_ensure(m, sizeof(struct _row_v11));
-	if (fread(m->ptr, sizeof(struct _row_v11), 1, fd) != 1) {
-		if (ferror(fd))
-			say_error("fread error");
+	//
+	// Аллоцируем память под заголовок записи
+	//
+	tbuf_ensure (v11, sizeof (struct _row_v11));
+	//
+	// Читаем заголовок записи из файла
+	//
+	if (fread (v11->ptr, sizeof (struct _row_v11), 1, fd) != 1)
+	{
+		if (ferror (fd))
+			say_error ("fread error");
 		return NULL;
 	}
 
-	tbuf_append(m, NULL, offsetof(struct _row_v11, data));
+	//
+	// Проматываем указатель буфера для добавления данных на область
+	// данных записи
+	//
+	tbuf_append (v11, NULL, offsetof (struct _row_v11, data));
 
-	/* header crc32c calculated on <lsn, tm, len, data_crc32c> */
-	header_crc = crc32c(0, m->ptr + offsetof(struct _row_v11, lsn),
-			    sizeof(struct _row_v11) - offsetof(struct _row_v11, lsn));
-
-	if (_row_v11(m)->header_crc32c != header_crc) {
-		say_error("header crc32c mismatch");
+	//
+	// Считаем CRC32 загруженного заголовка по полям <lsn, tm, len, data_crc32c>
+	//
+	u32 header_crc = crc32c (0, v11->ptr + offsetof (struct _row_v11, lsn), sizeof (struct _row_v11) - offsetof (struct _row_v11, lsn));
+	//
+	// ... и проверяем корректность загрузки заголовка
+	//
+	if (_row_v11(v11)->header_crc32c != header_crc)
+	{
+		say_error ("header crc32c mismatch");
 		return NULL;
 	}
 
-	tbuf_ensure(m, tbuf_len(m) + _row_v11(m)->len);
-	if (fread(_row_v11(m)->data, _row_v11(m)->len, 1, fd) != 1) {
-		if (ferror(fd))
-			say_error("fread error");
+	//
+	// Добавляем в буфер память под данные записи
+	//
+	tbuf_ensure (v11, tbuf_len (v11) + _row_v11 (v11)->len);
+	//
+	// Читаем данные записи из файла
+	//
+	if (fread (_row_v11 (v11)->data, _row_v11 (v11)->len, 1, fd) != 1)
+	{
+		if (ferror (fd))
+			say_error ("fread error");
 		return NULL;
 	}
 
-	tbuf_append(m, NULL, _row_v11(m)->len);
+	//
+	// Проматываем указатель буфера для добавления данных за область записи
+	//
+	tbuf_append (v11, NULL, _row_v11 (v11)->len);
 
-	data_crc = crc32c(0, _row_v11(m)->data, _row_v11(m)->len);
-	if (_row_v11(m)->data_crc32c != data_crc) {
-		say_error("data crc32c mismatch");
+	//
+	// Считаем CRC32 данных записи
+	//
+	data_crc = crc32c (0, _row_v11 (v11)->data, _row_v11 (v11)->len);
+	//
+	// ... и проверяем корректность загрузки заголовка
+	//
+	if (_row_v11 (v11)->data_crc32c != data_crc)
+	{
+		say_error ("data crc32c mismatch");
 		return NULL;
 	}
 
-	if (tbuf_len(m) < sizeof(struct _row_v11) + sizeof(u16)) {
-		say_error("row is too short");
+	//
+	// Если длина загруженной записи меньше чем заголовок и обязательный тэг,
+	// то запись прочитана не полностью
+	//
+	if (tbuf_len (v11) < (sizeof (struct _row_v11) + sizeof (u16)))
+	{
+		say_error ("row is too short");
 		return NULL;
 	}
 
-	say_debug2("%s: LSN:%" PRIi64, __func__, _row_v11(m)->lsn);
+	say_debug2 ("%s: LSN:%" PRIi64, __func__, _row_v11 (v11)->lsn);
 
-	struct row_v12 *r = convert_row_v11_to_v12(m)->ptr;
+	//
+	// Конвертируем запись версии 0.11 в запись версии 0.12
+	//
+	struct row_v12* v12 = convert_row_v11_to_v12 (v11)->ptr;
 
-	/* some of old tarantool snapshots has all rows with lsn == 0,
-	   so using lsn from record will reset recovery lsn set by snap_initial_tag to 0,
-	   also v11 snapshots imply that SCN === LSN */
-	if (r->lsn == 0 && (r->tag & TAG_SNAP) == TAG_SNAP)
-		r->scn = r->lsn = self->lsn;
+	//
+	// Некоторые старые версии снапшотов Tarantool'а содержат все
+	// записи с lsn == 0, то есть использование lsn из записи сбросит
+	// lsn, установленный snap_initial_tag в 0. Так же снапшоты версии 0.11
+	// подразумевают, что scn == lsn, поэтому scn тоже корректируем
+	//
+	if ((v12->lsn == 0) && ((v12->tag&TAG_SNAP) == TAG_SNAP))
+		v12->scn = v12->lsn = self->lsn;
 
-	return r;
+	return v12;
 }
 
 
