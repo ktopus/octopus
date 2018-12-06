@@ -889,8 +889,6 @@ read_row
 {
 	struct tbuf* v11 = tbuf_alloc (fiber->pool);
 
-	u32 data_crc;
-
 	//
 	// Аллоцируем память под заголовок записи
 	//
@@ -946,7 +944,7 @@ read_row
 	//
 	// Считаем CRC32 данных записи
 	//
-	data_crc = crc32c (0, _row_v11 (v11)->data, _row_v11 (v11)->len);
+	u32 data_crc = crc32c (0, _row_v11 (v11)->data, _row_v11 (v11)->len);
 	//
 	// ... и проверяем корректность загрузки заголовка
 	//
