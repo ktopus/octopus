@@ -234,9 +234,10 @@ enable_local_writes
 recover_row:(struct row_v12 *)row
 {
 	assert ((row->scn <= 0) ||
-			((row->tag & TAG_MASK) == snap_data) ||
-			((row->tag & TAG_MASK) == snap_initial) ||
-			((row->tag & TAG_MASK) == snap_final) ||
+			((row->tag&TAG_MASK) == snap_data) ||
+			((row->tag&TAG_MASK) == wal_data) ||
+			((row->tag&TAG_MASK) == snap_initial) ||
+			((row->tag&TAG_MASK) == snap_final) ||
 			(row->shard_id == self->id));
 	int old_ushard = fiber->ushard;
 	fiber->ushard = self->id;
