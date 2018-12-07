@@ -230,86 +230,106 @@ enable_local_writes
 	}
 }
 
-- (void)
-recover_row:(struct row_v12 *)row
+-(void)
+recover_row:(struct row_v12*)_row
 {
-	assert ((row->scn <= 0) ||
-			((row->tag&TAG_MASK) == snap_data) ||
-			((row->tag&TAG_MASK) == wal_data) ||
-			((row->tag&TAG_MASK) == snap_initial) ||
-			((row->tag&TAG_MASK) == snap_final) ||
-			(row->shard_id == self->id));
+	assert ((_row->scn <= 0) ||
+			((_row->tag&TAG_MASK) == snap_data) ||
+			((_row->tag&TAG_MASK) == wal_data) ||
+			((_row->tag&TAG_MASK) == snap_initial) ||
+			((_row->tag&TAG_MASK) == snap_final) ||
+			(_row->shard_id == self->id));
+
 	int old_ushard = fiber->ushard;
 	fiber->ushard = self->id;
 
-	if (!partial_replica_loading) {
-		if (unlikely(cfg.sync_scn_with_lsn && dummy && row->lsn != row->scn))
-			panic("LSN != SCN : %"PRIi64 " != %"PRIi64, row->lsn, row->scn);
+	if (!partial_replica_loading)
+	{
+		if (unlikely (cfg.sync_scn_with_lsn && dummy && (_row->lsn != _row->scn)))
+			panic ("LSN != SCN : %"PRIi64 " != %"PRIi64, _row->lsn, _row->scn);
 
-		if (unlikely(row->scn - scn != 1 && (row->tag & ~TAG_MASK) == TAG_WAL &&
-			     cfg.panic_on_scn_gap))
-			panic("SCN sequence has gap after %"PRIi64 " -> %"PRIi64, scn, row->scn);
+		if (unlikely (((_row->scn - scn) != 1) && ((_row->tag & ~TAG_MASK) == TAG_WAL) && cfg.panic_on_scn_gap))
+			panic ("SCN sequence has gap after %"PRIi64 " -> %"PRIi64, scn, _row->scn);
 
-
-		// calculate run_crc _before_ calling executor: it may change row
-		if (scn_changer(row->tag))
-			run_crc_calc(&run_crc_log, row->tag, row->data, row->len);
+		//
+		// Вычисляем run_crc ПЕРЕД запуском движка, он может изменить переданную строку
+		//
+		if (scn_changer (_row->tag))
+			run_crc_calc (&run_crc_log, _row->tag, _row->data, _row->len);
 	}
 
-	switch (row->tag & TAG_MASK) {
-	case snap_initial:
-		break;
-	case snap_final:
-		if (dummy || partial_replica)
+	switch (_row->tag & TAG_MASK)
+	{
+		case snap_initial:
+			break;
+
+		case snap_final:
+			if (dummy || partial_replica)
+				snap_loaded = true;
+
+			if (dummy && [(id)executor respondsTo:@selector (snap_final_row)])
+				[(id)executor snap_final_row];
+			break;
+
+		case run_crc:
+			if (cfg.ignore_run_crc || partial_replica)
+				break;
+
+			if (_row->len != (sizeof (i64) + 2*sizeof (u32)))
+				break;
+
+			run_crc_verify (&run_crc_state, &TBUF (_row->data, _row->len, NULL));
+			break;
+
+		case nop:
+			break;
+
+		case wal_final:
+			assert (false);
+
+		case shard_create:
+			break;
+
+		case shard_alter:
+			[self alter:(struct shard_op*)_row->data];
+
+			if (!loading && ![self our_shard])
+			{
+				[self free];
+
+				fiber->ushard = old_ushard;
+				return;
+			}
+			break;
+
+		case shard_final:
 			snap_loaded = true;
-		if (dummy && [(id)executor respondsTo:@selector(snap_final_row)])
-			[(id)executor snap_final_row];
-		break;
-	case run_crc:
-		if (cfg.ignore_run_crc || partial_replica)
 			break;
 
-		if (row->len != sizeof(i64) + sizeof(u32) * 2)
+		default:
+			[executor apply:&TBUF (_row->data, _row->len, fiber->pool) tag:_row->tag];
 			break;
-
-		run_crc_verify(&run_crc_state, &TBUF(row->data, row->len, NULL));
-		break;
-	case nop:
-		break;
-	case wal_final:
-		assert(false);
-	case shard_create:
-		break;
-	case shard_alter:
-		[self alter:(struct shard_op *)row->data];
-		if (!loading && ![self our_shard]) {
-			[self free];
-			fiber->ushard = old_ushard;
-			return;
-		}
-		break;
-	case shard_final:
-		snap_loaded = true;
-		break;
-	default:
-		[executor apply:&TBUF(row->data, row->len, fiber->pool) tag:row->tag];
-		break;
 	}
 
-	if (!partial_replica_loading) {
-		last_update_tstamp = ev_now();
-		lag = last_update_tstamp - row->tm;
+	if (!partial_replica_loading)
+	{
+		last_update_tstamp = ev_now ();
+		lag = last_update_tstamp - _row->tm;
 
-		if (scn_changer(row->tag)) {
-			run_crc_record(&run_crc_state, (struct run_crc_hist){ .scn = row->scn, .value = run_crc_log });
-			scn = row->scn;
+		if (scn_changer (_row->tag))
+		{
+			run_crc_record (&run_crc_state, (struct run_crc_hist){.scn = _row->scn, .value = run_crc_log});
+			scn = _row->scn;
 			if (partial_replica)
-				memcpy(&remote_scn, row->remote_scn, 6);
+				memcpy (&remote_scn, _row->remote_scn, 6);
 		}
-	} else {
-		if (scn_changer(row->tag))
-			memcpy(&remote_scn, row->remote_scn, 6);
 	}
+	else
+	{
+		if (scn_changer (_row->tag))
+			memcpy (&remote_scn, _row->remote_scn, 6);
+	}
+
 	fiber->ushard = old_ushard;
 }
 
