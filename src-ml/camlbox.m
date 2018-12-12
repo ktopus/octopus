@@ -11,6 +11,7 @@
 #import <pickle.h>
 #import <shard.h>
 
+#import <mod/box/op.h>
 #import <mod/box/box.h>
 #import <mod/box/src-ml/camlbox.h>
 

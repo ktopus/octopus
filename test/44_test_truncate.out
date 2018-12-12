@@ -1,0 +1,49 @@
+# box.insert([1, "abc"])
+1
+
+# box.select(1, 2, 3)
+[["\x01\x00\x00\x00", "abc"]]
+
+# box.lua("user_proc.truncate", "0")
+[]
+
+# box.select(1, 2, 3)
+[]
+
+# box.insert([2, "klm"])
+1
+
+# box.select(1, 2, 3)
+[["\x02\x00\x00\x00", "klm"]]
+
+# box.truncate()
+:success
+
+# box.select(1, 2, 3)
+[]
+
+# box.insert([3, "xyz"])
+1
+
+# box.select(1, 2, 3)
+[["\x03\x00\x00\x00", "xyz"]]
+
+run truncate over admin telnet interface
+---
+error: command is disabled
+...
+# box.select(1, 2, 3)
+[["\x03\x00\x00\x00", "xyz"]]
+
+# box.insert([3, "xyz"])
+1
+
+# box.select(1, 2, 3)
+[["\x03\x00\x00\x00", "xyz"]]
+
+run truncate over admin telnet interface
+---
+...
+# box.select(1, 2, 3)
+[]
+

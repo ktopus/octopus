@@ -5,7 +5,8 @@
 #include <caml/callback.h>
 #include <caml/fail.h>
 
-#include <mod/box/box.h>
+#import <mod/box/op.h>
+#import <mod/box/box.h>
 
 struct {
 	struct index_node node;

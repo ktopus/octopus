@@ -11,6 +11,8 @@ obj += src-lua/onlineconf.o
 
 src/octopus.o src/net_io.o src/fiber.o: XCFLAGS += -DOCT_OBJECT
 
+obj += mod/box/common.o
+obj += mod/box/tuple.o
 obj += mod/box/box.o
 obj += mod/box/op.o
 obj += mod/box/meta_op.o
@@ -30,6 +32,7 @@ obj += mod/box/src-lua/box/loop.o
 obj += mod/box/src-lua/box/expire.o
 obj += mod/box/src-lua/box/dyn_tuple.o
 obj += mod/box/src-lua/box/op.o
+obj += mod/box/src-lua/box/meta_op.o
 obj += mod/box/src-lua/box/string_ext.o
 obj += mod/box/src-lua/box/cast.o
 endif

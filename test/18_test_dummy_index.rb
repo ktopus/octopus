@@ -28,6 +28,7 @@ env.connect_eval do
   insert [2,3]
 
   env.snapshot
+  sleep 0.1
 end
 
 env.restart

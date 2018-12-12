@@ -39,30 +39,13 @@
 
 #import <src-lua/octopus_lua.h>
 #include <third_party/luajit/src/lj_obj.h> /* for LJ_TCDATA */
+#import <mod/box/op.h>
 #import <mod/box/box.h>
 #import <mod/box/src-lua/moonbox.h>
 
 #import <shard.h>
 
 const int object_space_max_idx = MAX_IDX;
-
-Box *
-shard_box()
-{
-	return ((struct box_txn *)fiber->txn)->box;
-}
-
-int
-shard_box_id()
-{
-	return shard_box()->shard->id;
-}
-
-int
-box_version()
-{
-	return shard_box()->version;
-}
 
 struct object_space *
 object_space_l(Box *box, int n)
@@ -219,81 +202,103 @@ read_push_field(lua_State *L, struct tbuf *buf)
 
 static int box_entry_i = 0;
 void
-box_dispach_lua(struct netmsg_head *wbuf, struct iproto *request)
+box_dispach_lua (struct netmsg_head* _wbuf, struct iproto* _request)
 {
 	WITH_AUTORELEASE;
 
-	lua_State *L = fiber->L;
-	struct tbuf data = TBUF(request->data, request->data_len, fiber->pool);
+	lua_State* L = fiber->L;
 
-	u32 flags = read_u32(&data); (void)flags; /* compat, ignored */
-	u32 flen = read_varint32(&data);
-	void *fname = read_bytes(&data, flen);
-	u32 nargs = read_u32(&data);
+	struct tbuf data = TBUF (_request->data, _request->data_len, fiber->pool);
 
-	luaO_pushtraceback(L);
-	int __attribute__((cleanup(restore_top))) top = lua_gettop(L);
+	//
+	// Игнорируем флаги
+	//
+	(void)read_u32 (&data);
 
-	if (box_entry_i == 0) {
-		lua_getglobal(L, "box");
-		lua_getfield(L, -1, "entry");
-		lua_remove(L, -2);
-		box_entry_i = lua_ref(L, LUA_REGISTRYINDEX);
+	//
+	// Длина имени Lua-процедуры
+	//
+	u32 flen  = read_varint32 (&data);
+	//
+	// Имя Lua-процедуры
+	//
+	void* fname = read_bytes (&data, flen);
+	//
+	// Число аргументов Lua-процедуры
+	//
+	u32 nargs = read_u32 (&data);
+
+	luaO_pushtraceback (L);
+	int __attribute__((cleanup(restore_top))) top = lua_gettop (L);
+
+	if (box_entry_i == 0)
+	{
+		lua_getglobal (L, "box");
+		lua_getfield (L, -1, "entry");
+		lua_remove (L, -2);
+		box_entry_i = lua_ref (L, LUA_REGISTRYINDEX);
 	}
-	lua_rawgeti(L, LUA_REGISTRYINDEX, box_entry_i);
+	lua_rawgeti (L, LUA_REGISTRYINDEX, box_entry_i);
 
-	lua_pushlstring(L, fname, flen);
-	lua_pushlightuserdata(L, wbuf);
-	lua_pushlightuserdata(L, request);
+	lua_pushlstring (L, fname, flen);
+	lua_pushlightuserdata (L, _wbuf);
+	lua_pushlightuserdata (L, _request);
 
-	if (!lua_checkstack(L, nargs)) {
-		iproto_raise(ERR_CODE_ILLEGAL_PARAMS, "too many args to exec_lua");
-	}
+	if (!lua_checkstack (L, nargs))
+		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "too many args to exec_lua");
 
-	for (int i = 0; i < nargs; i++)
-		read_push_field(L, &data);
+	for (int i = 0; i < nargs; ++i)
+		read_push_field (L, &data);
 
-	/* FIXME: switch to native exceptions ? */
-	if (lua_pcall(L, 3 + nargs, LUA_MULTRET, top)) {
-		const char *reason = lua_tostring(L, -1);
+	//
+	// FIXME: switch to native exceptions ?
+	//
+	if (lua_pcall (L, 3 + nargs, LUA_MULTRET, top))
+	{
+		const char* reason = lua_tostring (L, -1);
 		int code = ERR_CODE_ILLEGAL_PARAMS;
 
-		if (strncmp(reason, "code:", 5) == 0) {
-			char *r = strchr(reason, 'r');
-			if (r && strncmp(r, "reason:", 7) == 0) {
-				code = atoi(reason + 5);
+		if (strncmp (reason, "code:", 5) == 0)
+		{
+			char* r = strchr (reason, 'r');
+			if (r && strncmp (r, "reason:", 7) == 0)
+			{
+				code = atoi (reason + 5);
 				reason = r + 7;
 			}
 		}
 
-		iproto_raise(code, reason);
+		iproto_raise (code, reason);
 	}
 
-	if (box_submit(fiber->txn) == -1)
-		iproto_raise(ERR_CODE_UNKNOWN_ERROR, "unable write wal row");
+	if (box_submit (fiber->txn) == -1)
+		iproto_raise (ERR_CODE_UNKNOWN_ERROR, "unable write wal row");
 
 	int newtop = lua_gettop(L);
-	if (newtop != top) {
-		if (newtop != top + 3 && newtop != top + 2) {
-			iproto_raise_fmt(ERR_CODE_ILLEGAL_PARAMS,
-				"illegal return from wrapped function %s", fname);
-		}
-		struct netmsg_mark mark;
-		netmsg_getmark(wbuf, &mark);
-		struct iproto_retcode *reply = iproto_reply(wbuf, request,
-							    lua_tointeger(L, top + 2));
-		if (newtop == top + 3 && !lua_isnil(L, top + 3)) {
-			lua_remove(L, top + 2);
-			lua_pushlightuserdata(L, wbuf);
+	if (newtop != top)
+	{
+		if ((newtop != (top + 3)) && (newtop != (top + 2)))
+			iproto_raise_fmt (ERR_CODE_ILLEGAL_PARAMS, "illegal return from wrapped function %s", fname);
 
-			if (lua_pcall(L, 2, 0, top)) {
-				netmsg_rewind(wbuf, &mark);
-				iproto_raise(ERR_CODE_ILLEGAL_PARAMS, lua_tostring(L, -1));
+		struct netmsg_mark mark;
+		netmsg_getmark (_wbuf, &mark);
+
+		struct iproto_retcode* reply = iproto_reply(_wbuf, _request, lua_tointeger (L, top + 2));
+		if ((newtop == (top + 3)) && !lua_isnil (L, top + 3))
+		{
+			lua_remove (L, top + 2);
+			lua_pushlightuserdata (L, _wbuf);
+
+			if (lua_pcall (L, 2, 0, top))
+			{
+				netmsg_rewind (_wbuf, &mark);
+
+				iproto_raise (ERR_CODE_ILLEGAL_PARAMS, lua_tostring (L, -1));
 			}
 		}
-		iproto_reply_fixup(wbuf, reply);
+
+		iproto_reply_fixup (_wbuf, reply);
 	}
 }
 
-register_source();
-
+register_source ();
