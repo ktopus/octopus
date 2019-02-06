@@ -34,17 +34,17 @@ NormalEnv.env_eval do
 		c.insert [i + 2, "abc#{i} + 2", i + 2]
 		c.select i + 0, i + 1, i + 2
 
-		c.select "abc#{i} + 0",        :index => 1, :limit => 1
-		c.select "abc#{i} + 0",        :index => 2, :limit => 1
-		c.select "abc#{i} + 0", i + 0, :index => 2, :limit => 1
+		c.select ["abc#{i} + 0"],        :index => 1, :limit => 1
+		c.select ["abc#{i} + 0"],        :index => 2, :limit => 1
+		c.select ["abc#{i} + 0", i + 0], :index => 2, :limit => 1
 
-		c.select "abc#{i} + 1",        :index => 1, :limit => 1
-		c.select "abc#{i} + 1",        :index => 2, :limit => 1
-		c.select "abc#{i} + 1", i + 1, :index => 2, :limit => 1
+		c.select ["abc#{i} + 1"],        :index => 1, :limit => 1
+		c.select ["abc#{i} + 1"],        :index => 2, :limit => 1
+		c.select ["abc#{i} + 1", i + 1], :index => 2, :limit => 1
 
-		c.select "abc#{i} + 2",        :index => 1, :limit => 1
-		c.select "abc#{i} + 2",        :index => 2, :limit => 1
-		c.select "abc#{i} + 2", i + 2, :index => 2, :limit => 1
+		c.select ["abc#{i} + 2"],        :index => 1, :limit => 1
+		c.select ["abc#{i} + 2"],        :index => 2, :limit => 1
+		c.select ["abc#{i} + 2", i + 2], :index => 2, :limit => 1
 
 		snapshot
 		sleep 0.1

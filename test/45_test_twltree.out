@@ -10,31 +10,31 @@
 # box.select(0, 1, 2)
 [["\x00\x00\x00\x00", "abc0 + 0", "\x00\x00\x00\x00"], ["\x01\x00\x00\x00", "abc0 + 1", "\x01\x00\x00\x00"], ["\x02\x00\x00\x00", "abc0 + 2", "\x02\x00\x00\x00"]]
 
-# box.select("abc0 + 0", {:index=>1, :limit=>1})
+# box.select(["abc0 + 0"], {:index=>1, :limit=>1})
 [["\x00\x00\x00\x00", "abc0 + 0", "\x00\x00\x00\x00"]]
 
-# box.select("abc0 + 0", {:index=>2, :limit=>1})
+# box.select(["abc0 + 0"], {:index=>2, :limit=>1})
 [["\x00\x00\x00\x00", "abc0 + 0", "\x00\x00\x00\x00"]]
 
-# box.select("abc0 + 0", 0, {:index=>2, :limit=>1})
+# box.select(["abc0 + 0", 0], {:index=>2, :limit=>1})
 [["\x00\x00\x00\x00", "abc0 + 0", "\x00\x00\x00\x00"]]
 
-# box.select("abc0 + 1", {:index=>1, :limit=>1})
+# box.select(["abc0 + 1"], {:index=>1, :limit=>1})
 [["\x01\x00\x00\x00", "abc0 + 1", "\x01\x00\x00\x00"]]
 
-# box.select("abc0 + 1", {:index=>2, :limit=>1})
+# box.select(["abc0 + 1"], {:index=>2, :limit=>1})
 [["\x01\x00\x00\x00", "abc0 + 1", "\x01\x00\x00\x00"]]
 
-# box.select("abc0 + 1", 1, {:index=>2, :limit=>1})
+# box.select(["abc0 + 1", 1], {:index=>2, :limit=>1})
 [["\x01\x00\x00\x00", "abc0 + 1", "\x01\x00\x00\x00"]]
 
-# box.select("abc0 + 2", {:index=>1, :limit=>1})
+# box.select(["abc0 + 2"], {:index=>1, :limit=>1})
 [["\x02\x00\x00\x00", "abc0 + 2", "\x02\x00\x00\x00"]]
 
-# box.select("abc0 + 2", {:index=>2, :limit=>1})
+# box.select(["abc0 + 2"], {:index=>2, :limit=>1})
 [["\x02\x00\x00\x00", "abc0 + 2", "\x02\x00\x00\x00"]]
 
-# box.select("abc0 + 2", 2, {:index=>2, :limit=>1})
+# box.select(["abc0 + 2", 2], {:index=>2, :limit=>1})
 [["\x02\x00\x00\x00", "abc0 + 2", "\x02\x00\x00\x00"]]
 
 # box.select(0, 1, 2)
@@ -70,31 +70,31 @@
 # box.select(1, 2, 3)
 [["\x01\x00\x00\x00", "abc1 + 0", "\x01\x00\x00\x00"], ["\x02\x00\x00\x00", "abc1 + 1", "\x02\x00\x00\x00"], ["\x03\x00\x00\x00", "abc1 + 2", "\x03\x00\x00\x00"]]
 
-# box.select("abc1 + 0", {:index=>1, :limit=>1})
+# box.select(["abc1 + 0"], {:index=>1, :limit=>1})
 [["\x01\x00\x00\x00", "abc1 + 0", "\x01\x00\x00\x00"]]
 
-# box.select("abc1 + 0", {:index=>2, :limit=>1})
+# box.select(["abc1 + 0"], {:index=>2, :limit=>1})
 [["\x01\x00\x00\x00", "abc1 + 0", "\x01\x00\x00\x00"]]
 
-# box.select("abc1 + 0", 1, {:index=>2, :limit=>1})
+# box.select(["abc1 + 0", 1], {:index=>2, :limit=>1})
 [["\x01\x00\x00\x00", "abc1 + 0", "\x01\x00\x00\x00"]]
 
-# box.select("abc1 + 1", {:index=>1, :limit=>1})
+# box.select(["abc1 + 1"], {:index=>1, :limit=>1})
 [["\x02\x00\x00\x00", "abc1 + 1", "\x02\x00\x00\x00"]]
 
-# box.select("abc1 + 1", {:index=>2, :limit=>1})
+# box.select(["abc1 + 1"], {:index=>2, :limit=>1})
 [["\x02\x00\x00\x00", "abc1 + 1", "\x02\x00\x00\x00"]]
 
-# box.select("abc1 + 1", 2, {:index=>2, :limit=>1})
+# box.select(["abc1 + 1", 2], {:index=>2, :limit=>1})
 [["\x02\x00\x00\x00", "abc1 + 1", "\x02\x00\x00\x00"]]
 
-# box.select("abc1 + 2", {:index=>1, :limit=>1})
+# box.select(["abc1 + 2"], {:index=>1, :limit=>1})
 [["\x03\x00\x00\x00", "abc1 + 2", "\x03\x00\x00\x00"]]
 
-# box.select("abc1 + 2", {:index=>2, :limit=>1})
+# box.select(["abc1 + 2"], {:index=>2, :limit=>1})
 [["\x03\x00\x00\x00", "abc1 + 2", "\x03\x00\x00\x00"]]
 
-# box.select("abc1 + 2", 3, {:index=>2, :limit=>1})
+# box.select(["abc1 + 2", 3], {:index=>2, :limit=>1})
 [["\x03\x00\x00\x00", "abc1 + 2", "\x03\x00\x00\x00"]]
 
 # box.select(1, 2, 3)
@@ -130,31 +130,31 @@
 # box.select(2, 3, 4)
 [["\x02\x00\x00\x00", "abc2 + 0", "\x02\x00\x00\x00"], ["\x03\x00\x00\x00", "abc2 + 1", "\x03\x00\x00\x00"], ["\x04\x00\x00\x00", "abc2 + 2", "\x04\x00\x00\x00"]]
 
-# box.select("abc2 + 0", {:index=>1, :limit=>1})
+# box.select(["abc2 + 0"], {:index=>1, :limit=>1})
 [["\x02\x00\x00\x00", "abc2 + 0", "\x02\x00\x00\x00"]]
 
-# box.select("abc2 + 0", {:index=>2, :limit=>1})
+# box.select(["abc2 + 0"], {:index=>2, :limit=>1})
 [["\x02\x00\x00\x00", "abc2 + 0", "\x02\x00\x00\x00"]]
 
-# box.select("abc2 + 0", 2, {:index=>2, :limit=>1})
+# box.select(["abc2 + 0", 2], {:index=>2, :limit=>1})
 [["\x02\x00\x00\x00", "abc2 + 0", "\x02\x00\x00\x00"]]
 
-# box.select("abc2 + 1", {:index=>1, :limit=>1})
+# box.select(["abc2 + 1"], {:index=>1, :limit=>1})
 [["\x03\x00\x00\x00", "abc2 + 1", "\x03\x00\x00\x00"]]
 
-# box.select("abc2 + 1", {:index=>2, :limit=>1})
+# box.select(["abc2 + 1"], {:index=>2, :limit=>1})
 [["\x03\x00\x00\x00", "abc2 + 1", "\x03\x00\x00\x00"]]
 
-# box.select("abc2 + 1", 3, {:index=>2, :limit=>1})
+# box.select(["abc2 + 1", 3], {:index=>2, :limit=>1})
 [["\x03\x00\x00\x00", "abc2 + 1", "\x03\x00\x00\x00"]]
 
-# box.select("abc2 + 2", {:index=>1, :limit=>1})
+# box.select(["abc2 + 2"], {:index=>1, :limit=>1})
 [["\x04\x00\x00\x00", "abc2 + 2", "\x04\x00\x00\x00"]]
 
-# box.select("abc2 + 2", {:index=>2, :limit=>1})
+# box.select(["abc2 + 2"], {:index=>2, :limit=>1})
 [["\x04\x00\x00\x00", "abc2 + 2", "\x04\x00\x00\x00"]]
 
-# box.select("abc2 + 2", 4, {:index=>2, :limit=>1})
+# box.select(["abc2 + 2", 4], {:index=>2, :limit=>1})
 [["\x04\x00\x00\x00", "abc2 + 2", "\x04\x00\x00\x00"]]
 
 # box.select(2, 3, 4)
@@ -190,31 +190,31 @@
 # box.select(3, 4, 5)
 [["\x03\x00\x00\x00", "abc3 + 0", "\x03\x00\x00\x00"], ["\x04\x00\x00\x00", "abc3 + 1", "\x04\x00\x00\x00"], ["\x05\x00\x00\x00", "abc3 + 2", "\x05\x00\x00\x00"]]
 
-# box.select("abc3 + 0", {:index=>1, :limit=>1})
+# box.select(["abc3 + 0"], {:index=>1, :limit=>1})
 [["\x03\x00\x00\x00", "abc3 + 0", "\x03\x00\x00\x00"]]
 
-# box.select("abc3 + 0", {:index=>2, :limit=>1})
+# box.select(["abc3 + 0"], {:index=>2, :limit=>1})
 [["\x03\x00\x00\x00", "abc3 + 0", "\x03\x00\x00\x00"]]
 
-# box.select("abc3 + 0", 3, {:index=>2, :limit=>1})
+# box.select(["abc3 + 0", 3], {:index=>2, :limit=>1})
 [["\x03\x00\x00\x00", "abc3 + 0", "\x03\x00\x00\x00"]]
 
-# box.select("abc3 + 1", {:index=>1, :limit=>1})
+# box.select(["abc3 + 1"], {:index=>1, :limit=>1})
 [["\x04\x00\x00\x00", "abc3 + 1", "\x04\x00\x00\x00"]]
 
-# box.select("abc3 + 1", {:index=>2, :limit=>1})
+# box.select(["abc3 + 1"], {:index=>2, :limit=>1})
 [["\x04\x00\x00\x00", "abc3 + 1", "\x04\x00\x00\x00"]]
 
-# box.select("abc3 + 1", 4, {:index=>2, :limit=>1})
+# box.select(["abc3 + 1", 4], {:index=>2, :limit=>1})
 [["\x04\x00\x00\x00", "abc3 + 1", "\x04\x00\x00\x00"]]
 
-# box.select("abc3 + 2", {:index=>1, :limit=>1})
+# box.select(["abc3 + 2"], {:index=>1, :limit=>1})
 [["\x05\x00\x00\x00", "abc3 + 2", "\x05\x00\x00\x00"]]
 
-# box.select("abc3 + 2", {:index=>2, :limit=>1})
+# box.select(["abc3 + 2"], {:index=>2, :limit=>1})
 [["\x05\x00\x00\x00", "abc3 + 2", "\x05\x00\x00\x00"]]
 
-# box.select("abc3 + 2", 5, {:index=>2, :limit=>1})
+# box.select(["abc3 + 2", 5], {:index=>2, :limit=>1})
 [["\x05\x00\x00\x00", "abc3 + 2", "\x05\x00\x00\x00"]]
 
 # box.select(3, 4, 5)
@@ -250,31 +250,31 @@
 # box.select(4, 5, 6)
 [["\x04\x00\x00\x00", "abc4 + 0", "\x04\x00\x00\x00"], ["\x05\x00\x00\x00", "abc4 + 1", "\x05\x00\x00\x00"], ["\x06\x00\x00\x00", "abc4 + 2", "\x06\x00\x00\x00"]]
 
-# box.select("abc4 + 0", {:index=>1, :limit=>1})
+# box.select(["abc4 + 0"], {:index=>1, :limit=>1})
 [["\x04\x00\x00\x00", "abc4 + 0", "\x04\x00\x00\x00"]]
 
-# box.select("abc4 + 0", {:index=>2, :limit=>1})
+# box.select(["abc4 + 0"], {:index=>2, :limit=>1})
 [["\x04\x00\x00\x00", "abc4 + 0", "\x04\x00\x00\x00"]]
 
-# box.select("abc4 + 0", 4, {:index=>2, :limit=>1})
+# box.select(["abc4 + 0", 4], {:index=>2, :limit=>1})
 [["\x04\x00\x00\x00", "abc4 + 0", "\x04\x00\x00\x00"]]
 
-# box.select("abc4 + 1", {:index=>1, :limit=>1})
+# box.select(["abc4 + 1"], {:index=>1, :limit=>1})
 [["\x05\x00\x00\x00", "abc4 + 1", "\x05\x00\x00\x00"]]
 
-# box.select("abc4 + 1", {:index=>2, :limit=>1})
+# box.select(["abc4 + 1"], {:index=>2, :limit=>1})
 [["\x05\x00\x00\x00", "abc4 + 1", "\x05\x00\x00\x00"]]
 
-# box.select("abc4 + 1", 5, {:index=>2, :limit=>1})
+# box.select(["abc4 + 1", 5], {:index=>2, :limit=>1})
 [["\x05\x00\x00\x00", "abc4 + 1", "\x05\x00\x00\x00"]]
 
-# box.select("abc4 + 2", {:index=>1, :limit=>1})
+# box.select(["abc4 + 2"], {:index=>1, :limit=>1})
 [["\x06\x00\x00\x00", "abc4 + 2", "\x06\x00\x00\x00"]]
 
-# box.select("abc4 + 2", {:index=>2, :limit=>1})
+# box.select(["abc4 + 2"], {:index=>2, :limit=>1})
 [["\x06\x00\x00\x00", "abc4 + 2", "\x06\x00\x00\x00"]]
 
-# box.select("abc4 + 2", 6, {:index=>2, :limit=>1})
+# box.select(["abc4 + 2", 6], {:index=>2, :limit=>1})
 [["\x06\x00\x00\x00", "abc4 + 2", "\x06\x00\x00\x00"]]
 
 # box.select(4, 5, 6)
@@ -310,31 +310,31 @@
 # box.select(5, 6, 7)
 [["\x05\x00\x00\x00", "abc5 + 0", "\x05\x00\x00\x00"], ["\x06\x00\x00\x00", "abc5 + 1", "\x06\x00\x00\x00"], ["\a\x00\x00\x00", "abc5 + 2", "\a\x00\x00\x00"]]
 
-# box.select("abc5 + 0", {:index=>1, :limit=>1})
+# box.select(["abc5 + 0"], {:index=>1, :limit=>1})
 [["\x05\x00\x00\x00", "abc5 + 0", "\x05\x00\x00\x00"]]
 
-# box.select("abc5 + 0", {:index=>2, :limit=>1})
+# box.select(["abc5 + 0"], {:index=>2, :limit=>1})
 [["\x05\x00\x00\x00", "abc5 + 0", "\x05\x00\x00\x00"]]
 
-# box.select("abc5 + 0", 5, {:index=>2, :limit=>1})
+# box.select(["abc5 + 0", 5], {:index=>2, :limit=>1})
 [["\x05\x00\x00\x00", "abc5 + 0", "\x05\x00\x00\x00"]]
 
-# box.select("abc5 + 1", {:index=>1, :limit=>1})
+# box.select(["abc5 + 1"], {:index=>1, :limit=>1})
 [["\x06\x00\x00\x00", "abc5 + 1", "\x06\x00\x00\x00"]]
 
-# box.select("abc5 + 1", {:index=>2, :limit=>1})
+# box.select(["abc5 + 1"], {:index=>2, :limit=>1})
 [["\x06\x00\x00\x00", "abc5 + 1", "\x06\x00\x00\x00"]]
 
-# box.select("abc5 + 1", 6, {:index=>2, :limit=>1})
+# box.select(["abc5 + 1", 6], {:index=>2, :limit=>1})
 [["\x06\x00\x00\x00", "abc5 + 1", "\x06\x00\x00\x00"]]
 
-# box.select("abc5 + 2", {:index=>1, :limit=>1})
+# box.select(["abc5 + 2"], {:index=>1, :limit=>1})
 [["\a\x00\x00\x00", "abc5 + 2", "\a\x00\x00\x00"]]
 
-# box.select("abc5 + 2", {:index=>2, :limit=>1})
+# box.select(["abc5 + 2"], {:index=>2, :limit=>1})
 [["\a\x00\x00\x00", "abc5 + 2", "\a\x00\x00\x00"]]
 
-# box.select("abc5 + 2", 7, {:index=>2, :limit=>1})
+# box.select(["abc5 + 2", 7], {:index=>2, :limit=>1})
 [["\a\x00\x00\x00", "abc5 + 2", "\a\x00\x00\x00"]]
 
 # box.select(5, 6, 7)
@@ -370,31 +370,31 @@
 # box.select(6, 7, 8)
 [["\x06\x00\x00\x00", "abc6 + 0", "\x06\x00\x00\x00"], ["\a\x00\x00\x00", "abc6 + 1", "\a\x00\x00\x00"], ["\b\x00\x00\x00", "abc6 + 2", "\b\x00\x00\x00"]]
 
-# box.select("abc6 + 0", {:index=>1, :limit=>1})
+# box.select(["abc6 + 0"], {:index=>1, :limit=>1})
 [["\x06\x00\x00\x00", "abc6 + 0", "\x06\x00\x00\x00"]]
 
-# box.select("abc6 + 0", {:index=>2, :limit=>1})
+# box.select(["abc6 + 0"], {:index=>2, :limit=>1})
 [["\x06\x00\x00\x00", "abc6 + 0", "\x06\x00\x00\x00"]]
 
-# box.select("abc6 + 0", 6, {:index=>2, :limit=>1})
+# box.select(["abc6 + 0", 6], {:index=>2, :limit=>1})
 [["\x06\x00\x00\x00", "abc6 + 0", "\x06\x00\x00\x00"]]
 
-# box.select("abc6 + 1", {:index=>1, :limit=>1})
+# box.select(["abc6 + 1"], {:index=>1, :limit=>1})
 [["\a\x00\x00\x00", "abc6 + 1", "\a\x00\x00\x00"]]
 
-# box.select("abc6 + 1", {:index=>2, :limit=>1})
+# box.select(["abc6 + 1"], {:index=>2, :limit=>1})
 [["\a\x00\x00\x00", "abc6 + 1", "\a\x00\x00\x00"]]
 
-# box.select("abc6 + 1", 7, {:index=>2, :limit=>1})
+# box.select(["abc6 + 1", 7], {:index=>2, :limit=>1})
 [["\a\x00\x00\x00", "abc6 + 1", "\a\x00\x00\x00"]]
 
-# box.select("abc6 + 2", {:index=>1, :limit=>1})
+# box.select(["abc6 + 2"], {:index=>1, :limit=>1})
 [["\b\x00\x00\x00", "abc6 + 2", "\b\x00\x00\x00"]]
 
-# box.select("abc6 + 2", {:index=>2, :limit=>1})
+# box.select(["abc6 + 2"], {:index=>2, :limit=>1})
 [["\b\x00\x00\x00", "abc6 + 2", "\b\x00\x00\x00"]]
 
-# box.select("abc6 + 2", 8, {:index=>2, :limit=>1})
+# box.select(["abc6 + 2", 8], {:index=>2, :limit=>1})
 [["\b\x00\x00\x00", "abc6 + 2", "\b\x00\x00\x00"]]
 
 # box.select(6, 7, 8)
@@ -430,31 +430,31 @@
 # box.select(7, 8, 9)
 [["\a\x00\x00\x00", "abc7 + 0", "\a\x00\x00\x00"], ["\b\x00\x00\x00", "abc7 + 1", "\b\x00\x00\x00"], ["\t\x00\x00\x00", "abc7 + 2", "\t\x00\x00\x00"]]
 
-# box.select("abc7 + 0", {:index=>1, :limit=>1})
+# box.select(["abc7 + 0"], {:index=>1, :limit=>1})
 [["\a\x00\x00\x00", "abc7 + 0", "\a\x00\x00\x00"]]
 
-# box.select("abc7 + 0", {:index=>2, :limit=>1})
+# box.select(["abc7 + 0"], {:index=>2, :limit=>1})
 [["\a\x00\x00\x00", "abc7 + 0", "\a\x00\x00\x00"]]
 
-# box.select("abc7 + 0", 7, {:index=>2, :limit=>1})
+# box.select(["abc7 + 0", 7], {:index=>2, :limit=>1})
 [["\a\x00\x00\x00", "abc7 + 0", "\a\x00\x00\x00"]]
 
-# box.select("abc7 + 1", {:index=>1, :limit=>1})
+# box.select(["abc7 + 1"], {:index=>1, :limit=>1})
 [["\b\x00\x00\x00", "abc7 + 1", "\b\x00\x00\x00"]]
 
-# box.select("abc7 + 1", {:index=>2, :limit=>1})
+# box.select(["abc7 + 1"], {:index=>2, :limit=>1})
 [["\b\x00\x00\x00", "abc7 + 1", "\b\x00\x00\x00"]]
 
-# box.select("abc7 + 1", 8, {:index=>2, :limit=>1})
+# box.select(["abc7 + 1", 8], {:index=>2, :limit=>1})
 [["\b\x00\x00\x00", "abc7 + 1", "\b\x00\x00\x00"]]
 
-# box.select("abc7 + 2", {:index=>1, :limit=>1})
+# box.select(["abc7 + 2"], {:index=>1, :limit=>1})
 [["\t\x00\x00\x00", "abc7 + 2", "\t\x00\x00\x00"]]
 
-# box.select("abc7 + 2", {:index=>2, :limit=>1})
+# box.select(["abc7 + 2"], {:index=>2, :limit=>1})
 [["\t\x00\x00\x00", "abc7 + 2", "\t\x00\x00\x00"]]
 
-# box.select("abc7 + 2", 9, {:index=>2, :limit=>1})
+# box.select(["abc7 + 2", 9], {:index=>2, :limit=>1})
 [["\t\x00\x00\x00", "abc7 + 2", "\t\x00\x00\x00"]]
 
 # box.select(7, 8, 9)
@@ -490,31 +490,31 @@
 # box.select(8, 9, 10)
 [["\b\x00\x00\x00", "abc8 + 0", "\b\x00\x00\x00"], ["\t\x00\x00\x00", "abc8 + 1", "\t\x00\x00\x00"], ["\n\x00\x00\x00", "abc8 + 2", "\n\x00\x00\x00"]]
 
-# box.select("abc8 + 0", {:index=>1, :limit=>1})
+# box.select(["abc8 + 0"], {:index=>1, :limit=>1})
 [["\b\x00\x00\x00", "abc8 + 0", "\b\x00\x00\x00"]]
 
-# box.select("abc8 + 0", {:index=>2, :limit=>1})
+# box.select(["abc8 + 0"], {:index=>2, :limit=>1})
 [["\b\x00\x00\x00", "abc8 + 0", "\b\x00\x00\x00"]]
 
-# box.select("abc8 + 0", 8, {:index=>2, :limit=>1})
+# box.select(["abc8 + 0", 8], {:index=>2, :limit=>1})
 [["\b\x00\x00\x00", "abc8 + 0", "\b\x00\x00\x00"]]
 
-# box.select("abc8 + 1", {:index=>1, :limit=>1})
+# box.select(["abc8 + 1"], {:index=>1, :limit=>1})
 [["\t\x00\x00\x00", "abc8 + 1", "\t\x00\x00\x00"]]
 
-# box.select("abc8 + 1", {:index=>2, :limit=>1})
+# box.select(["abc8 + 1"], {:index=>2, :limit=>1})
 [["\t\x00\x00\x00", "abc8 + 1", "\t\x00\x00\x00"]]
 
-# box.select("abc8 + 1", 9, {:index=>2, :limit=>1})
+# box.select(["abc8 + 1", 9], {:index=>2, :limit=>1})
 [["\t\x00\x00\x00", "abc8 + 1", "\t\x00\x00\x00"]]
 
-# box.select("abc8 + 2", {:index=>1, :limit=>1})
+# box.select(["abc8 + 2"], {:index=>1, :limit=>1})
 [["\n\x00\x00\x00", "abc8 + 2", "\n\x00\x00\x00"]]
 
-# box.select("abc8 + 2", {:index=>2, :limit=>1})
+# box.select(["abc8 + 2"], {:index=>2, :limit=>1})
 [["\n\x00\x00\x00", "abc8 + 2", "\n\x00\x00\x00"]]
 
-# box.select("abc8 + 2", 10, {:index=>2, :limit=>1})
+# box.select(["abc8 + 2", 10], {:index=>2, :limit=>1})
 [["\n\x00\x00\x00", "abc8 + 2", "\n\x00\x00\x00"]]
 
 # box.select(8, 9, 10)
@@ -550,31 +550,31 @@
 # box.select(9, 10, 11)
 [["\t\x00\x00\x00", "abc9 + 0", "\t\x00\x00\x00"], ["\n\x00\x00\x00", "abc9 + 1", "\n\x00\x00\x00"], ["\v\x00\x00\x00", "abc9 + 2", "\v\x00\x00\x00"]]
 
-# box.select("abc9 + 0", {:index=>1, :limit=>1})
+# box.select(["abc9 + 0"], {:index=>1, :limit=>1})
 [["\t\x00\x00\x00", "abc9 + 0", "\t\x00\x00\x00"]]
 
-# box.select("abc9 + 0", {:index=>2, :limit=>1})
+# box.select(["abc9 + 0"], {:index=>2, :limit=>1})
 [["\t\x00\x00\x00", "abc9 + 0", "\t\x00\x00\x00"]]
 
-# box.select("abc9 + 0", 9, {:index=>2, :limit=>1})
+# box.select(["abc9 + 0", 9], {:index=>2, :limit=>1})
 [["\t\x00\x00\x00", "abc9 + 0", "\t\x00\x00\x00"]]
 
-# box.select("abc9 + 1", {:index=>1, :limit=>1})
+# box.select(["abc9 + 1"], {:index=>1, :limit=>1})
 [["\n\x00\x00\x00", "abc9 + 1", "\n\x00\x00\x00"]]
 
-# box.select("abc9 + 1", {:index=>2, :limit=>1})
+# box.select(["abc9 + 1"], {:index=>2, :limit=>1})
 [["\n\x00\x00\x00", "abc9 + 1", "\n\x00\x00\x00"]]
 
-# box.select("abc9 + 1", 10, {:index=>2, :limit=>1})
+# box.select(["abc9 + 1", 10], {:index=>2, :limit=>1})
 [["\n\x00\x00\x00", "abc9 + 1", "\n\x00\x00\x00"]]
 
-# box.select("abc9 + 2", {:index=>1, :limit=>1})
+# box.select(["abc9 + 2"], {:index=>1, :limit=>1})
 [["\v\x00\x00\x00", "abc9 + 2", "\v\x00\x00\x00"]]
 
-# box.select("abc9 + 2", {:index=>2, :limit=>1})
+# box.select(["abc9 + 2"], {:index=>2, :limit=>1})
 [["\v\x00\x00\x00", "abc9 + 2", "\v\x00\x00\x00"]]
 
-# box.select("abc9 + 2", 11, {:index=>2, :limit=>1})
+# box.select(["abc9 + 2", 11], {:index=>2, :limit=>1})
 [["\v\x00\x00\x00", "abc9 + 2", "\v\x00\x00\x00"]]
 
 # box.select(9, 10, 11)
