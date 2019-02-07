@@ -1551,7 +1551,7 @@ process_select (struct netmsg_head* _h, Index<BasicIndex>* _idx, u32 _limit, u32
 	for (u32 i = 0; i < _count; ++i)
 	{
 		//
-		// Число полей ключа запроса
+		// Число запрашиваемых полей ключа
 		//
 		u32 c = read_u32 (_data);
 
@@ -1559,6 +1559,11 @@ process_select (struct netmsg_head* _h, Index<BasicIndex>* _idx, u32 _limit, u32
 		// Если число полей индекса совпадает с числом полей ключа
 		// запроса, то не важно каким именно является индекс, так
 		// как поиск выполняется с помощью полиморфной функции
+		//
+		// Поскольку при неуникальном древовидном индексе к нему неявно
+		// добавляется в конец первичный ключ, который делает его уникальным,
+		// то получается, что данный код нормально работает и в случае
+		// неуникального древовидного индекса
 		//
 		if (_idx->conf.cardinality == c)
 		{
@@ -1576,15 +1581,14 @@ process_select (struct netmsg_head* _h, Index<BasicIndex>* _idx, u32 _limit, u32
 				continue;
 
 			//
-			// Лимит исчерпан, но при этом необходимо продолжать читать данные,
-			// чтобы проверить корректность запроса
+			// Лимит исчерпан, продолжаем перебор запросов
 			//
 			if (unlikely (_limit == 0))
 				continue;
 
 			//
-			// Если задано смещение и оно ещё не достигнуто, то продолжаем выполнение
-			// операций
+			// Если задано смещение и оно ещё не достигнуто, то переходим к следующему
+			// запросу
 			//
 			if (unlikely (_offset > 0))
 			{
@@ -1598,14 +1602,14 @@ process_select (struct netmsg_head* _h, Index<BasicIndex>* _idx, u32 _limit, u32
 			++(*found);
 
 			//
-			// Уменьщаем число оставшихся для выборки записей
-			//
-			--_limit;
-
-			//
 			// Добавляем запись в результат
 			//
 			net_tuple_add (_h, obj);
+
+			//
+			// Уменьшаем число оставшихся для выборки записей
+			//
+			--_limit;
 		}
 		//
 		// Если число полей индекса не совпадает с числом полей ключа
@@ -1624,14 +1628,14 @@ process_select (struct netmsg_head* _h, Index<BasicIndex>* _idx, u32 _limit, u32
 			[tree iterator_init_with_key:_data cardinalty:c];
 
 			//
-			// Лимит исчерпан, но при этом необходимо продолжать читать данные,
-			// чтобы проверить корректность запроса
+			// Лимит исчерпан, переходим к следующему запросу
 			//
 			if (unlikely (_limit == 0))
 				continue;
 
 			//
-			// Проходим по индексу с использованием заданной функции сравнения
+			// Проходим по индексу с использованием заданной функции сравнения,
+			// поскольку в результате теперь может быть не одна запись
 			//
 			struct tnt_object* obj = NULL;
 			while ((obj = [tree iterator_next_check:cmp]) != NULL)
@@ -1664,16 +1668,16 @@ process_select (struct netmsg_head* _h, Index<BasicIndex>* _idx, u32 _limit, u32
 				++(*found);
 
 				//
+				// Добавляем запись в результат
+				//
+				net_tuple_add (_h, obj);
+
+				//
 				// Уменьшаем число оставшихся для выборки записей. Если лимит достигнут,
 				// то прерываем проход по индексу
 				//
 				if (--_limit == 0)
 					break;
-
-				//
-				// Добавляем запись в результат
-				//
-				net_tuple_add (_h, obj);
 			}
 		}
 		//
@@ -2638,7 +2642,7 @@ box_select_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 
 	//
 	// Параметры запроса: номер таблицы для выборки, номер индекса для выборки
-	// смещение окна данных, размер окна данных, общее число ключей для выборки
+	// смещение окна данных, размер окна данных, общее число запросов
 	//
 	i32 n      = read_u32 (&data);
 	u32 indexn = read_u32 (&data);
@@ -2649,7 +2653,6 @@ box_select_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 	//
 	// Таблица для выборки
 	//
-
 	struct object_space* osp = object_space (box, n);
 
 	ev_tstamp start = 0;
@@ -2672,7 +2675,9 @@ box_select_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 			iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "index is invalid");
 
 		//
-		// Статистика по количеству ключей для выборки
+		// Статистика по количеству запросов
+		//
+		// FIXME: почему называется SELECT_KEYS?
 		//
 		box_stat_collect (SELECT_KEYS, count);
 		//
@@ -2686,7 +2691,7 @@ box_select_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 			stat_sum_static (osp->statbase, BSS_SELECT_KEYS_IDX0+indexn, count);
 
 			//
-			// Если число ключей для выборки больше одного или индекс не
+			// Если число запросов для выборки больше одного или индекс не
 			// является хэшем
 			//
 			bool is_hash = index_type_is_hash (index->conf.type);
