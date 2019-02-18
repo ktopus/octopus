@@ -101,6 +101,7 @@ sub create_shards {
     my $s_per_node = int($self->shard_count / scalar (@{$self->nodes}));
     my $s_residue = $self->shard_count % scalar (@{$self->nodes});
     my $current = 1;
+    my $replica_num = 0;
     my $nodes_names = $self->_nodes_names();
     for my $node (@{$self->nodes}) {
         my $count = $s_per_node;
@@ -109,10 +110,13 @@ sub create_shards {
             $s_residue--;
         }
         my $save_node_name = delete $nodes_names->{$node};
+        my @rest_nodes = values %$nodes_names;
         for my $shard ($current..$current + $count - 1){
-            my $replicas = join ' ', values %$nodes_names;
+            my $replicas = $rest_nodes[$replica_num];
             print "./shardbox.pl -s=$node shard $shard create por $replicas";
             system("./shardbox.pl -s=$node shard $shard create por $replicas") unless $self->debug;
+            $replica_num++;
+            $replica_num = 0 if scalar(@rest_nodes) == $replica_num;
         }
         $nodes_names->{$node} = $save_node_name;
         $current+= $count;
@@ -120,31 +124,83 @@ sub create_shards {
     }
 }
 
+
 sub create_spaces {
     my $self = shift;
-    my $s = $self->nodes->[0];
+    my $s_per_node = int($self->shard_count / scalar (@{$self->nodes}));
+    my $s_residue = $self->shard_count % scalar (@{$self->nodes});
+    my $current = 1;
+    my $nodes_names = $self->_nodes_names();
     my $space = $self->space;
     my $unique_index = $self->indexes->[0];
-    die "Need unique index" unless $unique_index; 
-    for (1..$self->shard_count){
-        print "./shardbox.pl -s=$s shard $_ obj_space $space create $unique_index";
-        system("./shardbox.pl -s=$s shard $_ obj_space $space create $unique_index") unless $self->debug;
+    for my $node (@{$self->nodes}) {
+        my $count = $s_per_node;
+        if ($s_residue) {
+            $count++;
+            $s_residue--;
+        }
+        my $save_node_name = delete $nodes_names->{$node};
+        for my $shard ($current..$current + $count - 1){
+            print "./shardbox.pl -s=$node shard $shard obj_space $space create $unique_index";
+            system("./shardbox.pl -s=$node shard $shard obj_space $space create $unique_index") unless $self->debug;
+        }
+        $nodes_names->{$node} = $save_node_name;
+        $current+= $count;
+        print "===================================";
     }
 }
+
+#sub create_spaces {
+#    my $self = shift;
+#    my $s = $self->nodes->[0];
+#    my $space = $self->space;
+#    my $unique_index = $self->indexes->[0];
+#    die "Need unique index" unless $unique_index; 
+#    for (1..$self->shard_count){
+#        print "./shardbox.pl -s=$s shard $_ obj_space $space create $unique_index";
+#        system("./shardbox.pl -s=$s shard $_ obj_space $space create $unique_index") unless $self->debug;
+#    }
+#}
 
 sub create_indexes {
     my $self = shift;
-    my $s = $self->nodes->[0];
+    my $s_per_node = int($self->shard_count / scalar (@{$self->nodes}));
+    my $s_residue = $self->shard_count % scalar (@{$self->nodes});
+    my $current = 1;
+    my $nodes_names = $self->_nodes_names();
     my $space = $self->space;
-    for my $shard (1..$self->shard_count) {
-        for ( my $i = 1; $i < @{$self->indexes}; $i++){
-            my $command = "./shardbox.pl -s=$s shard $shard obj_space $space index $i create ".$self->indexes->[$i];
-            print  ($command);
-            system ($command) unless $self->debug;
+    my $unique_index = $self->indexes->[0];
+    for my $node (@{$self->nodes}) {
+        my $count = $s_per_node;
+        if ($s_residue) {
+            $count++;
+            $s_residue--;
         }
+        my $save_node_name = delete $nodes_names->{$node};
+        for my $shard ($current..$current + $count - 1){
+            for ( my $i = 1; $i < @{$self->indexes}; $i++){
+                my $command = "./shardbox.pl -s=$node shard $shard obj_space $space index $i create ".$self->indexes->[$i];
+                print  ($command);
+                system ($command) unless $self->debug;
+            }
+        }
+        $nodes_names->{$node} = $save_node_name;
+        $current+= $count;
+        print "===================================";
     }
-
 }
+#sub create_indexes {
+#    my $self = shift;
+#    my $s = $self->nodes->[0];
+#    my $space = $self->space;
+#    for my $shard (1..$self->shard_count) {
+#        for ( my $i = 1; $i < @{$self->indexes}; $i++){
+#            my $command = "./shardbox.pl -s=$s shard $shard obj_space $space index $i create ".$self->indexes->[$i];
+#            print  ($command);
+#            system ($command) unless $self->debug;
+#        }
+#    }
+#}
 
 __PACKAGE__->meta->make_immutable();
 1;
