@@ -866,7 +866,15 @@ build_secondary (struct object_space* _osp)
 		while ((obj = [pk iterator_next]))
 		{
 			for (int i = 0; i < hash_count; ++i)
+			{
+				if ([hashes[i] find_obj:obj] != NULL)
+				{
+					say_error ("got duplicate in n:%i index:%i, replace this unique HASH index with non unique TREE index",
+							   _osp->n, ((Index*)hashes[i])->conf.n);
+				}
+
 				[hashes[i] replace:obj];
+			}
 		}
 
 		//
@@ -1118,16 +1126,14 @@ prepare_tlv (struct box_txn* _tx, const struct tlv* _tlv)
 static int
 verify_indexes (struct object_space* _osp, size_t _rows)
 {
-	struct tnt_object* obj = NULL;
-	foreach_index (index, _osp)
+	foreach_indexi (1, index, _osp)
 	{
-		if (index->conf.n == 0)
-			continue;
+		struct tnt_object* obj = NULL;
 
 		title ("snap_dump/check index:%i", index->conf.n);
 
-		[index iterator_init];
 		size_t index_rows = 0;
+		[index iterator_init];
 		while ((obj = [index iterator_next]))
 		{
 			obj = tuple_visible_left (obj);
@@ -1482,10 +1488,6 @@ snapshot_write_rows:(XLog*)_log
 	// Обработанное число записей на текущий момент
 	//
 	size_t all_rows = 0;
-	//
-	// Количество записей в текущей таблице
-	//
-	size_t osp_rows;
 
 	@try
 	{
@@ -1531,7 +1533,7 @@ snapshot_write_rows:(XLog*)_log
 			//
 			// Проходим по всем записям таблицы
 			//
-			osp_rows = 0;
+			size_t osp_pk_rows = 0;
 			[pk iterator_init];
 			while ((obj = [pk iterator_next]))
 			{
@@ -1581,9 +1583,13 @@ snapshot_write_rows:(XLog*)_log
 					@throw [Error with_reason:"can't write tuple into WAL"];
 
 				//
+				// Общее количество записей в первичном ключе
+				//
+				++osp_pk_rows;
+
+				//
 				// Индикация прогресса записи данных
 				//
-				++osp_rows;
 				if (++all_rows%100000 == 0)
 				{
 					float pct = 100.0*all_rows/total_rows;
@@ -1622,12 +1628,23 @@ snapshot_write_rows:(XLog*)_log
 				}
 			}
 
-			if (verify_indexes (osp, osp_rows) < 0)
-			{
-				errno = EINVAL;
-
-				@throw [Error with_reason:"indexes are not valid"];
-			}
+			//
+			// Проверяем размеры индексов. При обнаружении расхождений ничего не делаем, а
+			// просто сообщаем о проблеме.
+			//
+			// Раньше здесь при несхождении размеров устанавливалось errno = EINVAL и выбрасывалось
+			// исключение. При объявлении уникального хэш индекса и записи в него дубликатов по
+			// индексируемому полю хэш ничего не говорил, а просто заменял старую версию записи
+			// на новую и при этом количество записей по первичному ключу и ключу с дубликатами
+			// оказывалось различным. Это приводило к тому, что здесь выдавалось исключение, снапшот
+			// не закрывался и данные, соответственно не сохранялись. Причём из-за установки EINVAL
+			// через какое-то время сохранение снапшота повторялось и так до бесконечности.
+			//
+			// Поскольку на самом деле это не приводило к проблемам, то сейчас мы снапшот пишем, но
+			// выдаём сообщение с предложением проверить, в чём дело.
+			//
+			if (verify_indexes (osp, osp_pk_rows) < 0)
+				say_error ("mismatch indexes: check for duplicates in unique HASH indexes");
 		}
 	}
 	@catch (Error* e)
