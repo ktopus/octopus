@@ -99,7 +99,8 @@ object_space_fill_stat_names (struct object_space* _osp)
 void
 object_space_clear_stat_names (struct object_space* _osp)
 {
-	stat_unregister (_osp->statbase);
+	if (_osp->statbase > -1)
+		stat_unregister (_osp->statbase);
 
 	_osp->statbase = -1;
 }

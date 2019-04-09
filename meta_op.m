@@ -85,7 +85,10 @@ prepare_create_object_space (struct box_meta_txn* _tx, int _n, struct tbuf* _dat
 	_tx->object_space->snap        = _tx->flags&1;
 	_tx->object_space->wal         = _tx->flags&2;
 	_tx->object_space->index[0]    = _tx->index;
-	object_space_fill_stat_names (_tx->object_space);
+
+	_tx->object_space->statbase = -1;
+	if (cfg.box_extended_stat)
+		object_space_fill_stat_names (_tx->object_space);
 
 	//
 	// Проверяем корректность созданной таблицы

@@ -2081,7 +2081,7 @@ box_op_commit (struct box_op* _bop)
 	//
 	// Статистика выполнения операций
 	//
-	if (cfg.box_extended_stat && (_bop->op != NOP))
+	if (cfg.box_extended_stat && (_bop->op != NOP) && (_bop->object_space->statbase > -1))
 		stat_sum_static (_bop->object_space->statbase, message_to_boxstat (_bop->op), 1);
 	box_stat_collect (_bop->op, 1);
 }
@@ -2670,7 +2670,7 @@ box_select_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 	ev_tstamp start = 0;
 	@try
 	{
-		if (cfg.box_extended_stat)
+		if (cfg.box_extended_stat && (osp->statbase > -1))
 			stat_sum_static (osp->statbase, BSS_SELECT_IDX0+indexn, 1);
 
 		//
@@ -2693,7 +2693,7 @@ box_select_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 		//
 		// Для расширенной статистики
 		//
-		if (cfg.box_extended_stat)
+		if (cfg.box_extended_stat && (osp->statbase > -1))
 		{
 			//
 			// Статистика по использованию индекса
@@ -2722,7 +2722,7 @@ box_select_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 		// Статистика
 		//
 		box_stat_collect (SELECT_TUPLES, found);
-		if  (cfg.box_extended_stat)
+		if  (cfg.box_extended_stat && (osp->statbase > -1))
 			stat_sum_static (osp->statbase, BSS_SELECT_TUPLES_IDX0+indexn, found);
 	}
 	@catch (id e)
@@ -2741,7 +2741,8 @@ box_select_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 		if (start != 0)
 		{
 			double diff = (ev_time () - start)*1000;
-			stat_aggregate_static (osp->statbase, BSS_SELECT_TIME_IDX0 + indexn, diff);
+			if (cfg.box_extended_stat && (osp->statbase > -1))
+				stat_aggregate_static (osp->statbase, BSS_SELECT_TIME_IDX0 + indexn, diff);
 			box_stat_collect_double (SELECT_TIME, diff);
 		}
 

@@ -645,7 +645,10 @@ configure_pk (Box* _box)
 		osp->snap        = !!cfg.object_space[i]->snap;
 		osp->wal         = osp->snap && !!cfg.object_space[i]->wal;
 		osp->cardinality = cfg.object_space[i]->cardinality;
-		object_space_fill_stat_names (osp);
+
+		osp->statbase = -1;
+		if (cfg.box_extended_stat)
+			object_space_fill_stat_names (osp);
 
 		//
 		// Если конфигурация индекса для таблицы не задана
