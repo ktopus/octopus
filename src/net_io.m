@@ -495,15 +495,18 @@ netmsg_io_shutdown(struct netmsg_io *io, int how)
 }
 
 void
-netmsg_io_close(struct netmsg_io *io)
+netmsg_io_close(struct netmsg_io* _io)
 {
-	if (io->fd < 0)
+	if (_io->fd < 0)
 		return;
-	say_debug("closing connection to %s", net_fd_name(io->fd));
-	netmsg_io_shutdown(io, SHUT_RDWR);
-	if (close(io->fd) < 0)
-		say_syswarn("close");
-	io->fd = -1;
+
+	say_info ("closing connection to %s [%i]", net_fd_name (_io->fd), _io->fd);
+
+	netmsg_io_shutdown (_io, SHUT_RDWR);
+	if (close (_io->fd) < 0)
+		say_syswarn ("close");
+
+	_io->fd = -1;
 }
 
 ssize_t
@@ -535,29 +538,44 @@ netmsg_io_write_cb(ev_io *ev, int events)
 }
 
 ssize_t
-netmsg_io_read_for_cb(ev_io *ev, int __attribute__((unused)) events)
+netmsg_io_read_for_cb (ev_io* _ev, int _events __attribute__((unused)))
 {
-	struct netmsg_io *io = container_of(ev, struct netmsg_io, in);
+	struct netmsg_io* io = container_of (_ev, struct netmsg_io, in);
 
 	if ((io->flags & NETMSG_IO_SHARED_POOL) == 0)
-		netmsg_pool_ctx_gc(io->ctx);
+		netmsg_pool_ctx_gc (io->ctx);
 
-	ssize_t r = rbuf_recv(io, 16 * 1024);
+	ssize_t r = rbuf_recv (io, 16*1024);
+
 	[io data_ready];
 
-	if (r == 0) {
-		say_debug("peer %s closed connection", net_fd_name(ev->fd));
-		[io close];
-		return r;
-	}
+	//
+	// В сокете может не быть данных. Поскольку сокет не блокирующийся, то
+	// такая ситуация вполне допустима и закрывать здесь соединение нельзя.
+	// Надо продолжать ждать входящие данные
+	//
+//	if (r == 0)
+//	{
+//		say_info ("peer %s [%i] closed connection %i", net_fd_name (ev->fd), ev->fd, io->fd);
+//		[io close];
+//		return r;
+//	}
 
-	if (r < 0) {
-		if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
-			say_syswarn("recv(%i) from %s failed", ev->fd, net_fd_name(ev->fd));
+	//
+	// Ошибка чтения из сокета
+	//
+	if (r < 0)
+	{
+		//
+		// Если ошибка не восстановимая
+		//
+		if ((errno != EAGAIN) && (errno != EWOULDBLOCK) && (errno != EINTR))
+		{
+			say_syswarn ("recv (%i/%i) from %s failed", _ev->fd, io->fd, net_fd_name (_ev->fd));
 			[io close];
 		}
-		return r;
 	}
+
 	return r;
 }
 
