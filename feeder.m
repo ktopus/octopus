@@ -306,32 +306,47 @@ setup_filter:(struct feeder_filter*)_filter
 - (void)
 load_from:(i64)xid
 {
-	say_info("%s initial_xid:%"PRIi64, __func__, xid);
+	say_info ("%s initial_xid:%"PRIi64, __func__, xid);
 
-	if (xid == 0) {
-		/* full load from last valid snapshot */
+	if (xid == 0)
+	{
+		//
+		// full load from last valid snapshot
+		//
 		[reader load_full:nil];
 		return;
 	}
 
-	/* special case: newborn peer without WALs */
-	if ([snap_dir greatest_lsn]) {
-		while ([wal_dir greatest_lsn] <= 0) {
-			sleep(1);
-			keepalive();
+	//
+	// special case: newborn peer without WALs
+	//
+	if ([snap_dir greatest_lsn])
+	{
+		while ([wal_dir greatest_lsn] <= 0)
+		{
+			sleep (1);
+			keepalive ();
 		}
 	}
 
-	XLog *initial_wal;
-	if (shard_id != -1) {
+	XLog* initial_wal = nil;
+	if (shard_id != -1)
+	{
 		min_scn = xid;
+
 		initial_wal = [wal_dir find_with_scn:xid shard:shard_id];
-	} else {
-		min_lsn = xid;
-		initial_wal = [wal_dir find_with_lsn:xid];
+		if (initial_wal == nil)
+			raise_fmt ("unable to find initial WAL with scn:%"PRIi64" and shard:%i", xid, shard_id);
 	}
-	if (initial_wal == nil)
-		raise_fmt("unable to find initial WAL");
+	else
+	{
+		min_lsn = xid;
+
+		initial_wal = [wal_dir find_with_lsn:xid];
+		if (initial_wal == nil)
+			raise_fmt ("unable to find initial WAL with lsn:%li", xid);
+	}
+
 	[reader load_incr:initial_wal];
 }
 
@@ -506,89 +521,111 @@ recv_req(int fd)
 }
 
 static int
-feeder_worker(int parent_fd, int fd, void *state, int len)
+feeder_worker (int _parent_fd, int _fd, void* _state, int _len)
 {
-	close(parent_fd);
-	recover_feed_slave(fd, len > 1 ? state : recv_req(fd));
+	close (_parent_fd);
+
+	recover_feed_slave (_fd, (_len > 1) ? _state : recv_req (_fd));
+
 	return 0;
 }
 
-/* feeder_spawn_worker должен работать из отдельного фибера,
-   т.к. spawn_child использует блокировки wlock/wunlock.
-   wlock/wunlock требуют отдельного фибера для поддержания списка побудок */
-
+/**
+ * @brief Передача сокета другому процессу для обработки вызываемая в отдельной нити
+ *
+ * Для передачи нужна отдельная нить, т.к. spawn_child использует блокировки
+ * wlock/wunlock. wlock/wunlock требуют отдельной нити для поддержания списка
+ * побудок
+ */
 static void
-feeder_spawn_worker(va_list ap)
+feeder_spawn_worker (va_list _ap)
 {
-	int fd = va_arg(ap, int);
-	struct netmsg_io *io = va_arg(ap, void *);
-	void *req = va_arg(ap, void *);
-	int len = va_arg(ap, int);
+	int               fd  = va_arg (_ap, int);
+	struct netmsg_io* io  = va_arg (_ap, void*);
+	void*             req = va_arg (_ap, void*);
+	int               len = va_arg (_ap, int);
 
-	struct timeval tm = {
-		.tv_sec = cfg.wal_feeder_write_timeout,
-		.tv_usec = 0};
-	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tm,sizeof(tm));
-	setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tm,sizeof(tm));
+	struct timeval tm = { .tv_sec = cfg.wal_feeder_write_timeout, .tv_usec = 0 };
+	setsockopt (fd, SOL_SOCKET, SO_RCVTIMEO, &tm, sizeof (tm));
+	setsockopt (fd, SOL_SOCKET, SO_SNDTIMEO, &tm, sizeof (tm));
+
 	int zero = 0;
-	if (ioctl(fd, FIONBIO, &zero) < 0)
-		say_syserror("ioctl");
+	if (ioctl (fd, FIONBIO, &zero) < 0)
+		say_syserror ("ioctl");
 
-	struct child child = spawn_child("feeder/worker", feeder_worker, fd, req, len);
+	//
+	// Передаём сокет для обработки другому процессу
+	//
+	struct child child = spawn_child ("feeder/worker", feeder_worker, fd, req, len);
+
+	//
+	// После передачи можно закрывать свой сокет, так как нам он больше не нужен
+	//
 	if (io)
 		[io close];
 	else
-		close(fd);
-	if (child.pid > 0) {
-		say_info("WAL feeder client");
-		close(child.fd);
+		close (fd);
+
+	if (child.pid > 0)
+	{
+		say_info ("WAL feeder client");
+
+		close (child.fd);
 	}
 }
 
 static void
-feeder_accept(int fd, void *data __attribute__((unused)))
+feeder_accept (int _fd, void* _data __attribute__((unused)))
 {
-	if (cfg.wal_feeder_debug_no_fork) {
-		recover_feed_slave(fd, recv_req(fd));
-		close(fd);
+	if (cfg.wal_feeder_debug_no_fork)
+	{
+		recover_feed_slave (_fd, recv_req (_fd));
+		close (_fd);
 		return;
 	}
-	fiber_create("feeder_spawn_worker", feeder_spawn_worker, fd, nil, "\0", 1);
+
+	fiber_create ("feeder_spawn_worker", feeder_spawn_worker, _fd, NULL, "\0", 1);
 }
 
 static void
-iproto_feeder_cb(struct netmsg_head *wbuf, struct iproto *req)
+iproto_feeder_cb (struct netmsg_head* _wbuf, struct iproto* _req)
 {
-	struct netmsg_io *io = container_of(wbuf, struct netmsg_io, wbuf);
-	fiber_create("feeder_spawn_worker", feeder_spawn_worker, io->fd, io, req, sizeof(*req) + req->data_len);
+	struct netmsg_io* io = container_of (_wbuf, struct netmsg_io, wbuf);
+	assert (io->fd >= 0);
+
+	//
+	// Запускаем нить для передачи сокета другому процессу
+	//
+	fiber_create ("feeder_spawn_worker", feeder_spawn_worker, io->fd, io, _req, sizeof (struct iproto) + _req->data_len);
 }
 
 void
-feeder_service(struct iproto_service *s)
+feeder_service (struct iproto_service* _s)
 {
 	if (cfg.wal_writer_inbox_size == 0)
 		return;
 
-	service_register_iproto(s, MSG_REPLICA, iproto_feeder_cb, IPROTO_LOCAL);
+	service_register_iproto (_s, MSG_REPLICA, iproto_feeder_cb, IPROTO_LOCAL);
 }
 
 static void
-init(void)
+init (void)
 {
 	struct sockaddr_in server_addr;
 
-	if (cfg.wal_feeder_bind_addr == NULL || cfg.wal_writer_inbox_size == 0) {
-		say_info("WAL feeder is disabled");
+	if ((cfg.wal_feeder_bind_addr == NULL) || (cfg.wal_writer_inbox_size == 0))
+	{
+		say_info ("WAL feeder is disabled");
 		return;
 	}
 
-	if (cfg.wal_dir == NULL || cfg.snap_dir == NULL)
-		panic("can't start feeder without snap_dir or wal_dir");
+	if ((cfg.wal_dir == NULL) || (cfg.snap_dir == NULL))
+		panic ("can't start feeder without snap_dir or wal_dir");
 
-	if (atosin(cfg.wal_feeder_bind_addr, &server_addr) == -1)
-		panic("bad wal_feeder_bind_addr: '%s'", cfg.wal_feeder_bind_addr);
+	if (atosin (cfg.wal_feeder_bind_addr, &server_addr) == -1)
+		panic ("bad wal_feeder_bind_addr: '%s'", cfg.wal_feeder_bind_addr);
 
-	fiber_create("feeder/acceptor", tcp_server, cfg.wal_feeder_bind_addr, feeder_accept, NULL, NULL);
+	fiber_create ("feeder/acceptor", tcp_server, cfg.wal_feeder_bind_addr, feeder_accept, NULL, NULL);
 }
 
 static int
