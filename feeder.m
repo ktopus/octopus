@@ -556,13 +556,13 @@ feeder_spawn_worker (va_list _ap)
 	//
 	// Передаём сокет для обработки другому процессу
 	//
-	struct child child = spawn_child ("feeder/worker", feeder_worker, fd, req, len);
+	struct child child = spawn_child ("feeder/worker", feeder_worker, io, fd, req, len);
 
 	//
-	// После передачи можно закрывать свой сокет, так как нам он больше не нужен
+	// Можно закрывать свой сокет, так как нам он больше не нужен
 	//
 	if (io)
-		[io close];
+		[io release];
 	else
 		close (fd);
 
@@ -592,6 +592,12 @@ iproto_feeder_cb (struct netmsg_head* _wbuf, struct iproto* _req)
 {
 	struct netmsg_io* io = container_of (_wbuf, struct netmsg_io, wbuf);
 	assert (io->fd >= 0);
+
+	//
+	// Захватываем io, так как нам нужно гарантировать, что он не будет
+	// параллельно удалён
+	//
+	[io retain];
 
 	//
 	// Запускаем нить для передачи сокета другому процессу
