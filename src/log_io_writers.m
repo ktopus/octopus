@@ -590,7 +590,7 @@ init_lsn:(i64)init_lsn
 		if (conf->st[i].scn)
 			say_info("\tShard:%i SCN:%"PRIi64, i, conf->st[i].scn);
 	}
-	wal_writer = spawn_child("wal_writer", wal_disk_writer, -1, conf, sizeof(*conf));
+	wal_writer = spawn_child("wal_writer", wal_disk_writer, nil, -1, conf, sizeof(*conf));
 	if (wal_writer.pid < 0)
 		panic("unable to start WAL writer");
 	io = [netmsg_io alloc];

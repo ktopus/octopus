@@ -500,7 +500,7 @@ netmsg_io_close(struct netmsg_io* _io)
 	if (_io->fd < 0)
 		return;
 
-	say_info ("closing connection to %s [%i]", net_fd_name (_io->fd), _io->fd);
+	say_debug ("closing connection to %s [%i]", net_fd_name (_io->fd), _io->fd);
 
 	netmsg_io_shutdown (_io, SHUT_RDWR);
 	if (close (_io->fd) < 0)
@@ -546,7 +546,6 @@ netmsg_io_read_for_cb (ev_io* _ev, int _events __attribute__((unused)))
 		netmsg_pool_ctx_gc (io->ctx);
 
 	ssize_t r = rbuf_recv (io, 16*1024);
-
 	[io data_ready];
 
 	//
@@ -554,12 +553,13 @@ netmsg_io_read_for_cb (ev_io* _ev, int _events __attribute__((unused)))
 	// такая ситуация вполне допустима и закрывать здесь соединение нельзя.
 	// Надо продолжать ждать входящие данные
 	//
-//	if (r == 0)
-//	{
-//		say_info ("peer %s [%i] closed connection %i", net_fd_name (ev->fd), ev->fd, io->fd);
-//		[io close];
-//		return r;
-//	}
+	if (r == 0)
+	{
+		say_debug ("peer %s [%i] closed connection", net_fd_name (_ev->fd), _ev->fd);
+
+		[io close];
+		return r;
+	}
 
 	//
 	// Ошибка чтения из сокета

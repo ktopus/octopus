@@ -23,13 +23,26 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+#ifndef __SPAWN_CHILD_H
+#define __SPAWN_CHILD_H
 
-struct child {
+struct child
+{
 	pid_t pid;
+
 	int fd;
 };
-struct child spawn_child(const char *name, int (*handler)(int parent_fd, int fd, void *state, int len),
-			 int fd, void *state, int len);
 
-ssize_t sendfd(int sock, int fd_to_send, struct iovec *iov, int iovlen);
-ssize_t recvfd(int sock, int *fd, struct iovec *iov, int iovlen);
+/**
+ * @brief Передать файловый дескриптор @a _fd другому процессу для оббработки
+ *
+ * @a _io если задан, то он используется для контроля валидности файлового
+ * дескриптора перед передачей другому процессу, поскольку в процессе ожидания
+ * захвата лока он может быть закрыт и в этом случае передавать будет нечего.
+ */
+struct child spawn_child (const char* _name, int (*_h) (int, int, void*, int), struct netmsg_io* _io, int _fd, void* _state, int _len);
+
+ssize_t sendfd (int sock, int fd_to_send, struct iovec* iov, int iovlen);
+ssize_t recvfd (int sock, int* fd, struct iovec* iov, int iovlen);
+
+#endif /* __SPAWN_CHILD_H */

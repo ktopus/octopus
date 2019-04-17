@@ -256,52 +256,60 @@ io_ready(int event)
 	}
 }
 
-static struct rwlock lock;
-
 struct child
-spawn_child(const char *name, int (*handler)(int parent_fd, int fd, void *state, int len),
-	    int fd, void *state, int len)
+spawn_child (const char* _name, int (*_h) (int, int, void*, int), struct netmsg_io* _io, int _fd, void* _state, int _len)
 {
 	static struct child err = { .pid = -1, .fd = -1};
+	static struct rwlock lock;
+
+	assert (spawner_fd != -1);
+
+	struct fork_request request = { .handler = _h };
+	strncpy (request.name, _name, sizeof (request.name) - 1);
+	request.name[sizeof (request.name) - 1] = '\0';
+
+	struct iovec req_iov[2] =
+		{
+			{ .iov_base = &request, .iov_len = sizeof (request) },
+			{ .iov_base = _state  , .iov_len = _len }
+		};
+
+	wlock (&lock);
+	io_ready (EV_WRITE);
+	//
+	// Непосредственно перед передачей проверяем актуальность дескриптора файла, так
+	// как он может быть параллельно закрыт
+	//
+	if ((_io && (_io->fd != _fd)) || (sendfd (spawner_fd, _fd, req_iov, nelem (req_iov)) < 0))
+	{
+		wunlock (&lock);
+		return err;
+	}
+
 	int child_fd = -1;
-
-	assert(spawner_fd != -1);
-	struct fork_request request = { .handler = handler };
-	assert(strlen(name) < sizeof(request.name));
-	strcpy(request.name, name);
-
-	struct iovec req_iov[2] = { { .iov_base = &request,
-				      .iov_len = sizeof(request) },
-				    { .iov_base = state,
-				      .iov_len = len } };
-
-	wlock(&lock);
-	io_ready(EV_WRITE);
-	if (sendfd(spawner_fd, fd, req_iov, nelem(req_iov)) < 0) {
-		wunlock(&lock);
-		return err;
-	}
-
 	struct fork_reply reply;
-	struct iovec rep_iov[1] = { { .iov_base = &reply,
-				      .iov_len = sizeof(reply) } };
-	io_ready(EV_READ);
-	ssize_t r = recvfd(spawner_fd, &child_fd, rep_iov, nelem(rep_iov));
-	wunlock(&lock);
-	if (r <= 0) {
+	struct iovec rep_iov[1] = { { .iov_base = &reply, .iov_len = sizeof (reply) } };
+	io_ready (EV_READ);
+	ssize_t r = recvfd (spawner_fd, &child_fd, rep_iov, nelem (rep_iov));
+	wunlock (&lock);
+
+	if (r <= 0)
+	{
 		if (r == 0)
-			say_error("recvfd: EOF");
+			say_error ("recvfd: EOF");
 		return err;
 	}
+
 	/* fd is in non blocking mode, fork_pair() already did ioctl() */
 
-	if (reply.pid <= 0) {
-		say_error("unable to spawn %s", name);
+	if (reply.pid <= 0)
+	{
+		say_error ("unable to spawn %s", _name);
 		return err;
 	}
 
-	assert(child_fd >= 0);
-	return (struct child){ .pid = reply.pid, .fd = child_fd};
+	assert (child_fd >= 0);
+	return (struct child){ .pid = reply.pid, .fd = child_fd };
 }
 
 static void
