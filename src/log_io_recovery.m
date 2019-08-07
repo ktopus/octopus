@@ -573,22 +573,21 @@ load_from_remote
 	struct feeder_param feeder;
 	XLogRemoteReader *remote_reader = [[XLogRemoteReader alloc] init_recovery:self];
 	remote_loading = true;
-#if CFG_object_space
-	if (cfg.object_space) {
+	if (cfg.wal_feeder_addr != NULL && *cfg.wal_feeder_addr != 0) {
  		enum feeder_cfg_e fid_err = feeder_param_fill_from_cfg(&feeder, NULL);
 		assert (!fid_err && feeder.addr.sin_family != AF_UNSPEC);
 		count = [remote_reader load_from_remote:&feeder];
-	} else
-#endif
-	for (struct octopus_cfg_peer **p = cfg.peer; cfg.peer && *p; p++) {
-		if (strcmp((*p)->name, cfg.hostname) == 0)
-			continue;
+	} else {
+		for (struct octopus_cfg_peer **p = cfg.peer; cfg.peer && *p; p++) {
+			if (strcmp((*p)->name, cfg.hostname) == 0)
+				continue;
 
-		feeder = (struct feeder_param){ .ver = 2,
-						.addr = *peer_addr((*p)->name, PORT_REPLICATION),
-						.filter = {.type = FILTER_TYPE_C,
-							   .name = "shard" } };
-		count += [remote_reader load_from_remote:&feeder];
+			feeder = (struct feeder_param){ .ver = 2,
+				.addr = *peer_addr((*p)->name, PORT_REPLICATION),
+				.filter = {.type = FILTER_TYPE_C,
+					.name = "shard" } };
+			count += [remote_reader load_from_remote:&feeder];
+		}
 	}
 	remote_loading = false;
 	[remote_reader free];
