@@ -611,20 +611,17 @@ simple:(struct iproto_service *)service
 
 	i64 local_lsn = [self load_from_local];
 
-#if CFG_object_space
-	if (local_lsn == 0 && cfg.object_space) {
+	// if we dont have local data and replication is not configured then exit
+	if (local_lsn == 0) {
 		struct feeder_param feeder;
 		enum feeder_cfg_e fid_err = feeder_param_fill_from_cfg(&feeder, NULL);
-		if (fid_err || feeder.addr.sin_family == AF_UNSPEC) {
+		if ((fid_err || feeder.addr.sin_family == AF_UNSPEC) && (cfg.peer == NULL || *cfg.peer == NULL)) {
 			say_error("unable to find initial snapshot");
 			say_info("don't you forget to initialize "
 				 "storage with --init-storage switch?");
 			exit(EX_USAGE);
 		}
 	}
-#else
-	(void)local_lsn;
-#endif
 
 	if (cfg.local_hot_standby) {
 		[reader hot_standby];
@@ -674,14 +671,13 @@ enable_local_writes
 			say_error("unable to pull initial snapshot");
 			exit(1);
 		}
-		writer_lsn = 1;
-#if CFG_object_space
-		if (cfg.object_space) {
+		if ([self shard:0] && [self shard:0]->dummy) {
 			assert([[self shard:0] scn] > 0);
 			if (cfg.sync_scn_with_lsn)
 				writer_lsn = [[self shard:0] scn];
+		} else {
+			writer_lsn = 1;
 		}
-#endif
 	}
 
 	[self configure_wal_writer:writer_lsn];

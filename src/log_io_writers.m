@@ -567,9 +567,8 @@ init_lsn:(i64)init_lsn
    state:(id<RecoveryState>)state_
 {
 	assert(init_lsn > 0);
-#if CFG_object_space
-	assert(cfg.object_space == NULL || [[state_ shard:0] scn] > 0);
-#endif
+	assert(!([state_ shard:0] && [state_ shard:0]->dummy) || [[state_ shard:0] scn] > 0);
+
 	TAILQ_INIT(&wal_queue);
 	lsn = init_lsn;
 	state = state_;
