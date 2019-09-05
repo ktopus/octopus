@@ -1364,7 +1364,7 @@ memcached_info (struct tbuf* _out, const char* _what)
 		tbuf_printf (_out, "  version: \"%s\"" CRLF, octopus_version ());
 		tbuf_printf (_out, "  uptime: %i" CRLF, tnt_uptime ());
 		tbuf_printf (_out, "  pid: %i" CRLF, getpid ());
-		tbuf_printf (_out, "  config: \"%s\""CRLF, cfg_filename);
+		tbuf_printf (_out, "  config: \"%s\""CRLF, cfgFileName ());
 	}
 }
 
