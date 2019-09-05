@@ -72,6 +72,8 @@
 #endif
 #include <sys/utsname.h>
 
+#include <sched.h>
+
 #define DEFAULT_CFG_FILENAME "octopus.cfg"
 const char *cfg_filename = DEFAULT_CFG_FILENAME;
 char *cfg_filename_fullpath = NULL;
@@ -911,6 +913,24 @@ run_loop:
 	say_debug("entering event loop");
 	if (cfg.io_collect_interval > 0)
 		ev_set_io_collect_interval(cfg.io_collect_interval);
+
+	if (cfg.sched_affinity != NULL)
+	{
+		long nproc = sysconf (_SC_NPROCESSORS_ONLN);
+
+		cpu_set_t mask;
+		CPU_ZERO (&mask);
+		for (int i = 0; (cfg.sched_affinity[i] != '\0') && (i < nproc); ++i)
+		{
+			if (cfg.sched_affinity[i] != '0')
+				CPU_SET (i, &mask);
+		}
+
+		if (sched_setaffinity (0, sizeof (mask), &mask) == -1)
+			say_error ("can't set sched affinity with %s", cfg.sched_affinity);
+
+		say_info ("current sched cpu = %d", sched_getcpu ());
+	}
 
 	ev_set_invoke_pending_cb(octopus_ev_invoke_pending);
 	ev_run(0);

@@ -9,6 +9,17 @@ username=NULL, ro
 # setting to 0 disables saving coredumps completly
 coredump=0.0, ro
 
+# Mask of avaliable CPU's for main and workers processes run (string, NULL
+# means that all CPU's avaliable)
+#
+# example: "11110000000000000000000000000000"
+sched_affinity=NULL, ro
+
+# Mask of avaliable CPU's for snapshot process run (string, NULL means
+# that all CPU's avaliable)
+#
+# example: "00001000000000000000000000000000"
+snapper_sched_affinity=NULL, ro
 
 # Log verbosity, possible values: ERROR=1, CRIT=2, WARN=3, INFO=4(default), DEBUG=5
 log_level=4
