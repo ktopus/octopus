@@ -1301,6 +1301,15 @@ memcached_flushAll (Memcached* _memc, struct MC_Params* _params, struct netmsg_h
 	MEMCACHED_ADD_IOV_LITERAL (_params->noreply, _wbuf, "OK\r\n");
 }
 
+/**
+ * @brief Имя загруженного файла конфигурации
+ */
+static inline const char*
+cfgFileName ()
+{
+	return (cfg_filename_fullpath != NULL) ? cfg_filename_fullpath : cfg_filename;
+}
+
 void
 memcached_stats (Memcached* _memc, struct MC_Params* _params, struct netmsg_head* _wbuf)
 {
@@ -1315,6 +1324,7 @@ memcached_stats (Memcached* _memc, struct MC_Params* _params, struct netmsg_head
 	Memcached* memc = [[recovery shard:0] executor];
 	assert (memc != NULL);
 
+	tbuf_printf (out, "STAT config %s\r\n", cfgFileName ());
 	tbuf_printf (out, "STAT pid %"PRIu32"\r\n", (u32)getpid ());
 	tbuf_printf (out, "STAT uptime %"PRIu32"\r\n", (u32)tnt_uptime ());
 	tbuf_printf (out, "STAT time %"PRIu32"\r\n", (u32)ev_now ());
