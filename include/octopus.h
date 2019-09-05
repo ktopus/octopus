@@ -76,6 +76,7 @@ void register_module_(struct tnt_module *);
 extern struct octopus_cfg cfg;
 extern struct tbuf *cfg_out;
 extern const char *cfg_filename;
+extern char *cfg_filename_fullpath;
 extern bool init_storage, booting;
 extern char *binary_filename;
 
