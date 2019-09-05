@@ -1352,12 +1352,29 @@ memcached_stats (Memcached* _memc, struct MC_Params* _params, struct netmsg_head
 	netmsg_pool_ctx_gc (_wbuf->ctx);
 }
 
+/**
+ * @brief Вывод информации о сервисе
+ */
+static void
+memcached_info (struct tbuf* _out, const char* _what)
+{
+	if (_what == NULL)
+	{
+		tbuf_printf (_out, "info:" CRLF);
+		tbuf_printf (_out, "  version: \"%s\"" CRLF, octopus_version ());
+		tbuf_printf (_out, "  uptime: %i" CRLF, tnt_uptime ());
+		tbuf_printf (_out, "  pid: %i" CRLF, getpid ());
+		tbuf_printf (_out, "  config: \"%s\""CRLF, cfg_filename);
+	}
+}
+
 static struct tnt_module memcached =
 {
 	.name    = "memcached",
 	.version = memcached_version_string,
 	.init    = memcached_init,
-	.cat     = memcached_cat
+	.cat     = memcached_cat,
+	.info    = memcached_info
 };
 
 register_module (memcached);
