@@ -263,6 +263,7 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 		decr      = "decr"i spc key spc value noreply spc? eol @done @{ memcached_inc (_memc, &params, _wbuf, -1); };
 		stats     = "stats"i eol @done @{ memcached_stats (_memc, &params, _wbuf); };
 		flush_all = "flush_all"i (spc delay)? noreply spc? eol @done @{ memcached_flushAll (_memc, &params, _wbuf); };
+		version   = "version"i eol @done @{ memcached_version (_memc, &params, _wbuf); };
 		quit      = "quit"i eol @done @{ return 0; };
 
 		main := set       |
@@ -278,6 +279,7 @@ memcached_dispatch (Memcached* _memc, int _fd, struct tbuf* _rbuf, struct netmsg
 				decr      |
 				stats     |
 				flush_all |
+				version   |
 				quit;
 	}%%
 

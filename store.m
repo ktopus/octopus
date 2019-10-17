@@ -1352,6 +1352,19 @@ memcached_stats (Memcached* _memc, struct MC_Params* _params, struct netmsg_head
 	netmsg_pool_ctx_gc (_wbuf->ctx);
 }
 
+void
+memcached_version (Memcached* _memc, struct MC_Params* _params, struct netmsg_head* _wbuf)
+{
+	(void)_memc;
+	(void)_params;
+
+	struct tbuf* out = tbuf_alloc (_wbuf->ctx->pool);
+	tbuf_printf (out, "VERSION 1.2.5 (octopus/(silver)box)\r\n");
+
+	net_add_iov (_wbuf, out->ptr, tbuf_len (out));
+	netmsg_pool_ctx_gc (_wbuf->ctx);
+}
+
 /**
  * @brief Вывод информации о сервисе
  */

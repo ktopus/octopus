@@ -176,6 +176,11 @@ void memcached_flushAll (Memcached* _memc, struct MC_Params* _params, struct net
 void memcached_stats (Memcached* _memc, struct MC_Params* _params, struct netmsg_head* _wbuf);
 
 /**
+ * @brief Реализация команды VERSION протокола memcached
+ */
+void memcached_version (Memcached* _memc, struct MC_Params* _params, struct netmsg_head* _wbuf);
+
+/**
  * @brief Парсер и диспетчер команд
  *
  * Реализован в proto.rl с использованием Ragel
