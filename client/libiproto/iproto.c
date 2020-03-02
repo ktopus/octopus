@@ -615,6 +615,7 @@ li_close(struct iproto_connection_t *c) {
 	}
 
 	c->nReqInProgress = 0;
+        c->iovSendLength  = 0;
 }
 
 void
