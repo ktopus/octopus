@@ -21,6 +21,18 @@ sched_affinity=NULL, ro
 # example: "00001000000000000000000000000000"
 snapper_sched_affinity=NULL, ro
 
+# Main process priority
+# changes in range -20 -> 19
+# in top, ps etc you will see value = 20 + proc_priority
+# 0 value does not change priority
+proc_priority=0,ro
+
+# Snapshot process priority
+# changes in range -20 -> 19
+# in top, ps etc you will see value = 20 + snapper_proc_priority.
+# 0 value does not change priority
+snapper_proc_priority=0,ro
+
 # Log verbosity, possible values: ERROR=1, CRIT=2, WARN=3, INFO=4(default), DEBUG=5
 log_level=4
 

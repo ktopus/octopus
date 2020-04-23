@@ -50,6 +50,7 @@
 #include <sysexits.h>
 
 #include <sched.h>
+#include <sys/resource.h>
 
 static struct iproto_service *recovery_service = NULL;
 i64 fold_scn = 0;
@@ -850,6 +851,22 @@ fork_and_snapshot
 
 			say_info ("current snapper sched cpu = %d", sched_getcpu ());
 		}
+
+                if (cfg.snapper_proc_priority) {
+
+                        id_t pid  = getpid();
+                        int  res;
+
+                        res = setpriority(PRIO_PROCESS, pid, cfg.snapper_proc_priority);
+                        if (res == -1 && errno) {
+                                say_error("failed to set priority (%d), reason: '%s'",
+                                                cfg.snapper_proc_priority,
+                                                strerror(errno));
+                        }
+                        else {
+                                say_info("set snapper process priority to %d", cfg.snapper_proc_priority);
+                        }
+                }
 
 		int r = [snap_writer snapshot_write];
 

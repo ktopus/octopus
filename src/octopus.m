@@ -932,6 +932,22 @@ run_loop:
 		say_info ("current sched cpu = %d", sched_getcpu ());
 	}
 
+        if (cfg.proc_priority) {
+
+                id_t pid  = getpid();
+                int  res;
+
+                res = setpriority(PRIO_PROCESS, pid, cfg.proc_priority);
+                if (res == -1 && errno) {
+                        say_error("failed to set priority (%d), reason: '%s'",
+                                        cfg.proc_priority,
+                                        strerror(errno));
+                }
+                else {
+                        say_info("set main process priority to %d", cfg.proc_priority);
+                }
+        }
+
 	ev_set_invoke_pending_cb(octopus_ev_invoke_pending);
 	ev_run(0);
 	ev_loop_destroy();
