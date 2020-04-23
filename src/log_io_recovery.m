@@ -49,6 +49,8 @@
 #include <unistd.h>
 #include <sysexits.h>
 
+#include <sched.h>
+
 static struct iproto_service *recovery_service = NULL;
 i64 fold_scn = 0;
 
@@ -830,6 +832,25 @@ fork_and_snapshot
 			int res _unused_ = write(fd, "900\n", 4);
 			close(fd);
 		}
+
+		if (cfg.snapper_sched_affinity != NULL)
+		{
+			long nproc = sysconf (_SC_NPROCESSORS_ONLN);
+
+			cpu_set_t mask;
+			CPU_ZERO (&mask);
+			for (int i = 0; (cfg.snapper_sched_affinity[i] != '\0') && (i < nproc); ++i)
+			{
+				if (cfg.snapper_sched_affinity[i] != '0')
+					CPU_SET (i, &mask);
+			}
+
+			if (sched_setaffinity (0, sizeof (mask), &mask) == -1)
+				say_error ("can't set snapper sched affinity with %s", cfg.snapper_sched_affinity);
+
+			say_info ("current snapper sched cpu = %d", sched_getcpu ());
+		}
+
 		int r = [snap_writer snapshot_write];
 
 #ifdef COVERAGE
