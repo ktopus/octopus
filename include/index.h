@@ -271,6 +271,11 @@ typedef void (*ixsort_on_duplicate)(void* arg, struct index_node* a, struct inde
 @public
 	nihtree_t tree;
 	nihtree_conf_t tconf;
+
+        //stat counter:
+        size_t used_bytes;
+        uint32_t used_slots;
+
 	struct index_node node_b;
 	union index_field __padding_b[7];
 	nihtree_iter_t iter;

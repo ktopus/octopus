@@ -53,12 +53,17 @@ nih_index_key_cmp(const void *a, const void *b, void *arg)
 static int nih_slabs_n = 0;
 static struct slab_cache **nih_slabs = NULL;
 static void*
-nih_realloc(void *old, size_t new_size, void *arg _unused_)
+nih_realloc(void *old, size_t new_size, void *arg)
 {
+	NIHTree* t = (NIHTree*)arg;
+
 	int i;
 	if (new_size == 0) {
-		if (old)
+		if (old) {
+                        struct slab_cache *old_slab = slab_cache_of_ptr(old);
+                        t->used_bytes -= old_slab->item_size;
 			sfree(old);
+                }
 		return NULL;
 	}
 	struct slab_cache *cache = NULL;
@@ -81,12 +86,21 @@ nih_realloc(void *old, size_t new_size, void *arg _unused_)
 	void *new = slab_cache_alloc(cache);
 	if (new == NULL)
 		panic("Out of memory");
+        t->used_bytes += cache->item_size;
 	if (old != NULL) {
 		struct slab_cache *old_slab = slab_cache_of_ptr(old);
 		memcpy(new, old, MIN(new_size, old_slab->item_size));
+                t->used_bytes -= old_slab->item_size;
 		sfree(old);
 	}
 	return new;
+}
+
+static void
+nih_slots_changed(int32_t capa_dt, void *arg) {
+
+	NIHTree* t = (NIHTree*)arg;
+        t->used_slots += capa_dt;
 }
 
 static void
@@ -112,13 +126,13 @@ size
 - (u32)
 slots
 {
-	return nihtree_tuple_space(&tree);
+        return used_slots;
 }
 
 - (size_t)
 bytes
 {
-	return nihtree_bytes(&tree, &tconf);
+        return used_bytes;
 }
 
 - (void)
@@ -210,6 +224,7 @@ set_sorted_nodes:(void *)nodes count:(size_t)count
 	tconf.sizeof_key = node_size;
 	tconf.sizeof_tuple = sizeof(tnt_ptr);
 	tconf.nhrealloc = nih_realloc;
+        tconf.tuple_space_changed = nih_slots_changed;
 	tconf.inner_max = 128;
 	tconf.leaf_max = 32;
 	tconf.tuple_2_key = nih_tuple_2_index_key;
@@ -220,6 +235,8 @@ set_sorted_nodes:(void *)nodes count:(size_t)count
 	nih_raise(r);
 	assert(sizeof(iter)+sizeof(__iter_padding) >= nihtree_iter_need_size(6));
 	iter.max_height = 6;
+        used_bytes = 0;
+        used_slots = 0;
 	nihtree_init(&tree);
 	return self;
 }

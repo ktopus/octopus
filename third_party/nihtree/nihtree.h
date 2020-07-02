@@ -69,6 +69,8 @@ typedef struct nihtree_conf {
 	 * cnt - count of tuples
 	 */
 	void    (*leaf_destroyed)(void *ptr, uint32_t cnt, void *arg);
+
+        void    (*tuple_space_changed)(int32_t capa_dt, void *arg);
 } nihtree_conf_t;
 
 struct nihpage_common {

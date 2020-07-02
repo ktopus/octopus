@@ -251,6 +251,9 @@ nihleaf_alloc(nihtree_conf_t* conf, uint32_t capa) {
 		memset(a, 0, sizeof(*a));
 		a->capa = capa;
 	}
+        if (conf->tuple_space_changed) {
+                conf->tuple_space_changed(capa, conf->arg);
+        }
 	return a;
 }
 
@@ -261,6 +264,9 @@ nihleaf_moved(nihtree_conf_t* conf, nihleaf_t* leaf) {
 			conf->leaf_copied(leaf->data, leaf->cnt, conf->arg);
 		leaf->rc--;
 	} else {
+                if (conf->tuple_space_changed) {
+                        conf->tuple_space_changed(-leaf->capa, conf->arg);
+                }
 		nih_free(conf, leaf);
 	}
 }
@@ -295,6 +301,10 @@ nihleaf_release(nihtree_conf_t* conf, nihleaf_t* leaf) {
 		leaf->rc--;
 		return;
 	}
+
+        if (conf->tuple_space_changed) {
+                conf->tuple_space_changed(-leaf->capa, conf->arg);
+        }
 	if (conf->leaf_destroyed)
 		conf->leaf_destroyed(leaf->data, leaf->cnt, conf->arg);
 	nih_free(conf, leaf);
