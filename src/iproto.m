@@ -121,7 +121,7 @@ iproto_worker(va_list ap)
 		else
 			wlock(lock);
 #if CFG_warn_cb_time
-		ev_tstamp start = ev_now();
+		ev_tstamp start = ev_time();
 #endif
 		@try {
 			a.ih->cb(&a.io->wbuf, a.r);
@@ -134,7 +134,7 @@ iproto_worker(va_list ap)
 			[e release];
 		}
 #if CFG_warn_cb_time
-		if (ev_now() - start > cfg.warn_cb_time)
+		if (ev_time() - start > cfg.warn_cb_time)
 			say_warn("too long IPROTO:%i %.3f sec", a.r->msg_code, ev_now() - start);
 #endif
 
