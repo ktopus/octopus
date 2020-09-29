@@ -224,6 +224,7 @@ AC_SUBST(WCFLAGS)
 
 XCFLAGS=-Wall
 AC_CC_FLAG_CHECK([-fno-stack-protector], [XCFLAGS="-fno-stack-protector $XCFLAGS"])
+AC_CC_FLAG_CHECK([-Wno-address-of-packed-member], [XCFLAGS="-Wno-address-of-packed-member $XCFLAGS"])
 AC_CC_FLAG_CHECK([-pipe], [XCFLAGS="-pipe $XCFLAGS"])
 AC_CC_FLAG_CHECK([-MD -MP], [XCFLAGS="-MD -MP $XCFLAGS"])
 AC_SUBST(XCFLAGS)
