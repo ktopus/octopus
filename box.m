@@ -1144,6 +1144,9 @@ verify_indexes (struct object_space* _osp, size_t _rows)
 				continue;
 
 			++index_rows;
+
+			if ((cfg.snap_dump_check_rows > 0) && ((index_rows%cfg.snap_dump_check_rows) == 0))
+				fiber_sleep (cfg.snap_dump_check_sleep);
 		}
 
 		if (_rows != index_rows)
