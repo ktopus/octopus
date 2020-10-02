@@ -7,7 +7,7 @@
 # Also works with MinGW and Cygwin on Windows.
 # Please check msvcbuild.bat for building with MSVC on Windows.
 #
-# Copyright (C) 2005-2015 Mike Pall. See Copyright Notice in luajit.h
+# Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
 ##############################################################################
 
 MAJVER=  2
@@ -99,7 +99,7 @@ XCFLAGS=
 # enabled by default. Some other features that *might* break some existing
 # code (e.g. __pairs or os.execute() return values) can be enabled here.
 # Note: this does not provide full compatibility with Lua 5.2 at this time.
-XCFLAGS+= -DLUAJIT_ENABLE_LUA52COMPAT
+#XCFLAGS+= -DLUAJIT_ENABLE_LUA52COMPAT
 #
 # Disable the JIT compiler, i.e. turn LuaJIT into a pure interpreter.
 #XCFLAGS+= -DLUAJIT_DISABLE_JIT
@@ -109,6 +109,9 @@ XCFLAGS+= -DLUAJIT_ENABLE_LUA52COMPAT
 # default mode. Please see LJ_ARCH_NUMMODE in lj_arch.h for details.
 #XCFLAGS+= -DLUAJIT_NUMMODE=1
 #XCFLAGS+= -DLUAJIT_NUMMODE=2
+#
+# Enable GC64 mode for x64.
+#XCFLAGS+= -DLUAJIT_ENABLE_GC64
 #
 ##############################################################################
 
@@ -121,8 +124,8 @@ XCFLAGS+= -DLUAJIT_ENABLE_LUA52COMPAT
 #
 # Use the system provided memory allocator (realloc) instead of the
 # bundled memory allocator. This is slower, but sometimes helpful for
-# debugging. This option cannot be enabled on x64, since realloc usually
-# doesn't return addresses in the right address range.
+# debugging. This option cannot be enabled on x64 without GC64, since
+# realloc usually doesn't return addresses in the right address range.
 # OTOH this option is mandatory for Valgrind's memcheck tool on x64 and
 # the only way to get useful results from it for all other architectures.
 #XCFLAGS+= -DLUAJIT_USE_SYSMALLOC
@@ -135,7 +138,7 @@ XCFLAGS+= -DLUAJIT_ENABLE_LUA52COMPAT
 # This is the client for the GDB JIT API. GDB 7.0 or higher is required
 # to make use of it. See lj_gdbjit.c for details. Enabling this causes
 # a non-negligible overhead, even when not running under GDB.
-XCFLAGS+= -DLUAJIT_USE_GDBJIT
+#XCFLAGS+= -DLUAJIT_USE_GDBJIT
 #
 # Turn on assertions for the Lua/C API to debug problems with lua_* calls.
 # This is rather slow -- use only while developing C libraries/embeddings.
@@ -166,10 +169,6 @@ else
     HOST_SYS= Windows
     HOST_MSYS= cygwin
   endif
-  # Use Clang for OSX host.
-  ifeq (Darwin,$(HOST_SYS))
-    DEFAULT_CC= clang
-  endif
 endif
 
 ##############################################################################
@@ -188,7 +187,7 @@ endif
 #   make HOST_CC="gcc -m32" CROSS=powerpc-linux-gnu-
 
 ASOPTIONS= $(CCOPT) $(CCWARN) $(XCFLAGS) $(CFLAGS)
-CCOPTIONS= $(CCDEBUG) $(ASOPTIONS) $(if $(VPATH),-iquote .)
+CCOPTIONS= $(CCDEBUG) $(ASOPTIONS)
 LDOPTIONS= $(CCDEBUG) $(LDFLAGS)
 
 HOST_CC= $(CC)
@@ -197,7 +196,7 @@ HOST_RM= rm -f
 # copy of (plain) Lua 5.1 or 5.2, plus Lua BitOp. E.g. with: HOST_LUA=lua
 HOST_LUA=
 
-HOST_XCFLAGS= -I$(VPATH).
+HOST_XCFLAGS= -I.
 HOST_XLDFLAGS=
 HOST_XLIBS=
 HOST_ACFLAGS= $(CCOPTIONS) $(HOST_XCFLAGS) $(TARGET_ARCH) $(HOST_CFLAGS)
@@ -210,7 +209,7 @@ TARGET_CC= $(STATIC_CC)
 TARGET_STCC= $(STATIC_CC)
 TARGET_DYNCC= $(DYNAMIC_CC)
 TARGET_LD= $(CROSS)$(CC)
-TARGET_AR= $(CROSS)ar rcus
+TARGET_AR= $(CROSS)ar rcus 2>/dev/null
 TARGET_STRIP= $(CROSS)strip
 
 TARGET_LIBPATH= $(or $(PREFIX),/usr/local)/$(or $(MULTILIB),lib)
@@ -232,7 +231,7 @@ TARGET_ALDFLAGS= $(LDOPTIONS) $(TARGET_XLDFLAGS) $(TARGET_FLAGS) $(TARGET_LDFLAG
 TARGET_ASHLDFLAGS= $(LDOPTIONS) $(TARGET_XSHLDFLAGS) $(TARGET_FLAGS) $(TARGET_SHLDFLAGS)
 TARGET_ALIBS= $(TARGET_XLIBS) $(LIBS) $(TARGET_LIBS)
 
-TARGET_TESTARCH=$(shell $(TARGET_CC) $(TARGET_TCFLAGS) -E $(VPATH)lj_arch.h -dM)
+TARGET_TESTARCH=$(shell $(TARGET_CC) $(TARGET_TCFLAGS) -E lj_arch.h -dM)
 ifneq (,$(findstring LJ_TARGET_X64 ,$(TARGET_TESTARCH)))
   TARGET_LJARCH= x64
 else
@@ -243,6 +242,9 @@ ifneq (,$(findstring LJ_TARGET_ARM ,$(TARGET_TESTARCH)))
   TARGET_LJARCH= arm
 else
 ifneq (,$(findstring LJ_TARGET_ARM64 ,$(TARGET_TESTARCH)))
+  ifneq (,$(findstring __AARCH64EB__ ,$(TARGET_TESTARCH)))
+    TARGET_ARCH= -D__AARCH64EB__=1
+  endif
   TARGET_LJARCH= arm64
 else
 ifneq (,$(findstring LJ_TARGET_PPC ,$(TARGET_TESTARCH)))
@@ -257,7 +259,11 @@ ifneq (,$(findstring LJ_TARGET_MIPS ,$(TARGET_TESTARCH)))
   ifneq (,$(findstring MIPSEL ,$(TARGET_TESTARCH)))
     TARGET_ARCH= -D__MIPSEL__=1
   endif
-  TARGET_LJARCH= mips
+  ifneq (,$(findstring LJ_TARGET_MIPS64 ,$(TARGET_TESTARCH)))
+    TARGET_LJARCH= mips64
+  else
+    TARGET_LJARCH= mips
+  endif
 else
   $(error Unsupported target architecture)
 endif
@@ -310,7 +316,6 @@ ifeq (Darwin,$(TARGET_SYS))
     export MACOSX_DEPLOYMENT_TARGET=10.4
   endif
   TARGET_STRIP+= -x
-  TARGET_AR+= 2>/dev/null
   TARGET_XSHLDFLAGS= -dynamiclib -single_module -undefined dynamic_lookup -fPIC
   TARGET_DYNXLDOPTS=
   TARGET_XSHLDFLAGS+= -install_name $(TARGET_DYLIBPATH) -compatibility_version $(MAJVER).$(MINVER) -current_version $(MAJVER).$(MINVER).$(RELVER)
@@ -321,7 +326,6 @@ ifeq (Darwin,$(TARGET_SYS))
 else
 ifeq (iOS,$(TARGET_SYS))
   TARGET_STRIP+= -x
-  TARGET_AR+= 2>/dev/null
   TARGET_XSHLDFLAGS= -dynamiclib -single_module -undefined dynamic_lookup -fPIC
   TARGET_DYNXLDOPTS=
   TARGET_XSHLDFLAGS+= -install_name $(TARGET_DYLIBPATH) -compatibility_version $(MAJVER).$(MINVER) -current_version $(MAJVER).$(MINVER).$(RELVER)
@@ -382,12 +386,17 @@ ifeq (,$(HOST_LUA))
   DASM_DEP= $(MINILUA_T)
 endif
 
-DASM_DIR= $(VPATH)../dynasm
+DASM_DIR= ../dynasm
 DASM= $(HOST_LUA) $(DASM_DIR)/dynasm.lua
 DASM_XFLAGS=
 DASM_AFLAGS=
 DASM_ARCH= $(TARGET_LJARCH)
 
+ifneq (,$(findstring LJ_LE 1,$(TARGET_TESTARCH)))
+  DASM_AFLAGS+= -D ENDIAN_LE
+else
+  DASM_AFLAGS+= -D ENDIAN_BE
+endif
 ifneq (,$(findstring LJ_ARCH_BITS 64,$(TARGET_TESTARCH)))
   DASM_AFLAGS+= -D P64
 endif
@@ -451,7 +460,7 @@ endif
 endif
 
 DASM_FLAGS= $(DASM_XFLAGS) $(DASM_AFLAGS)
-DASM_DASC= $(VPATH)vm_$(DASM_ARCH).dasc
+DASM_DASC= vm_$(DASM_ARCH).dasc
 
 BUILDVM_O= host/buildvm.o host/buildvm_asm.o host/buildvm_peobj.o \
 	   host/buildvm_lib.o host/buildvm_fold.o
@@ -468,12 +477,12 @@ LJVM_MODE= elfasm
 
 LJLIB_O= lib_base.o lib_math.o lib_bit.o lib_string.o lib_table.o \
 	 lib_io.o lib_os.o lib_package.o lib_debug.o lib_jit.o lib_ffi.o
-LJLIB_C= $(LJLIB_O:%.o=$(VPATH)%.c)
+LJLIB_C= $(LJLIB_O:.o=.c)
 
 LJCORE_O= lj_gc.o lj_err.o lj_char.o lj_bc.o lj_obj.o lj_buf.o \
 	  lj_str.o lj_tab.o lj_func.o lj_udata.o lj_meta.o lj_debug.o \
 	  lj_state.o lj_dispatch.o lj_vmevent.o lj_vmmath.o lj_strscan.o \
-	  lj_strfmt.o lj_api.o lj_profile.o \
+	  lj_strfmt.o lj_strfmt_num.o lj_api.o lj_profile.o \
 	  lj_lex.o lj_parse.o lj_bcread.o lj_bcwrite.o lj_load.o \
 	  lj_ir.o lj_opt_mem.o lj_opt_fold.o lj_opt_narrow.o \
 	  lj_opt_dce.o lj_opt_loop.o lj_opt_split.o lj_opt_sink.o \
@@ -605,9 +614,9 @@ depend:
 	@$(HOST_CC) $(HOST_ACFLAGS) -MM *.c host/*.c | \
 	  sed -e "s| [^ ]*/dasm_\S*\.h||g" \
 	      -e "s|^\([^l ]\)|host/\1|" \
-	      -e "s| lj_target_\S*\.h| \$$(VPATH)lj_target_*.h|g" \
-	      -e "s| lj_emit_\S*\.h| \$$(VPATH)lj_emit_*.h|g" \
-	      -e "s| lj_asm_\S*\.h| \$$(VPATH)lj_asm_*.h|g" >Makefile.dep
+	      -e "s| lj_target_\S*\.h| lj_target_*.h|g" \
+	      -e "s| lj_emit_\S*\.h| lj_emit_*.h|g" \
+	      -e "s| lj_asm_\S*\.h| lj_asm_*.h|g" >Makefile.dep
 	@for file in $(ALL_HDRGEN); do \
 	  test -s $$file || $(HOST_RM) $$file; \
 	  done
@@ -622,7 +631,7 @@ $(MINILUA_T): $(MINILUA_O)
 	$(E) "HOSTLINK  $@"
 	$(Q)$(HOST_CC) $(HOST_ALDFLAGS) -o $@ $(MINILUA_O) $(MINILUA_LIBS) $(HOST_ALIBS)
 
-host/buildvm_arch.h: $(DASM_DASC) $(DASM_DEP)
+host/buildvm_arch.h: $(DASM_DASC) $(DASM_DEP) $(DASM_DIR)/*.lua
 	$(E) "DYNASM    $@"
 	$(Q)$(DASM) $(DASM_FLAGS) -o $@ $(DASM_DASC)
 
@@ -658,7 +667,7 @@ $(LIB_VMDEF): $(BUILDVM_T) $(LJLIB_C)
 
 lj_folddef.h: $(BUILDVM_T) lj_opt_fold.c
 	$(E) "BUILDVM   $@"
-	$(Q)$(BUILDVM_X) -m folddef -o $@ $(VPATH)lj_opt_fold.c
+	$(Q)$(BUILDVM_X) -m folddef -o $@ lj_opt_fold.c
 
 ##############################################################################
 # Object file rules.
@@ -682,7 +691,7 @@ $(HOST_O): %.o: %.c
 	$(E) "HOSTCC    $@"
 	$(Q)$(HOST_CC) $(HOST_ACFLAGS) -c -o $@ $<
 
-include $(VPATH)Makefile.dep
+include Makefile.dep
 
 ##############################################################################
 # Target file rules.
