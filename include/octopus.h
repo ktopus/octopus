@@ -62,7 +62,7 @@ struct tnt_module {
 	void (*info)(struct tbuf *out, const char *what);
 	void (*exec)(char *str, int len, struct tbuf *out);
 };
-struct tnt_module *modules_head, *current_module;
+extern struct tnt_module *modules_head, *current_module;
 struct tnt_module *module(const char *);
 void module_init(struct tnt_module *);
 void register_module_(struct tnt_module *);
@@ -127,6 +127,6 @@ void zero_io_collect_interval();
 void unzero_io_collect_interval();
 
 /* global seed for randoms and hashes */
-u64 seed[2];
+extern u64 seed[2];
 
 #endif

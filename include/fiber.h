@@ -98,7 +98,9 @@ static inline bool not_sched(struct Fiber* fib) { return fib != sched; }
 - (id) yield;
 @end
 
-SLIST_HEAD(, Fiber) fibers, zombie_fibers;
+SLIST_HEAD(SFiber, Fiber);
+
+extern struct SFiber fibers, zombie_fibers;
 
 void fiber_init(const char *sched_name);
 struct Fiber *fiber_create(const char *name, void (*f)(va_list va), ...);

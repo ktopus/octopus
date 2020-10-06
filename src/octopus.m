@@ -74,6 +74,9 @@
 
 #include <sched.h>
 
+struct shard_route shard_rt[MAX_SHARD];
+u64 seed[2];
+struct tnt_module *modules_head, *current_module;
 #define DEFAULT_CFG_FILENAME "octopus.cfg"
 const char *cfg_filename = DEFAULT_CFG_FILENAME;
 char *cfg_filename_fullpath = NULL;

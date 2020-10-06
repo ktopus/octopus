@@ -97,7 +97,7 @@ struct shard_conf {
 	const struct feeder_param *feeder_param;
 };
 
-struct shard_route shard_rt[MAX_SHARD];
+extern struct shard_route shard_rt[MAX_SHARD];
 
 void update_rt(int shard_id, Shard<Shard> *shard, const char *peer_name);
 

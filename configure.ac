@@ -219,6 +219,8 @@ AC_CC_FLAG_CHECK([-Wno-implicit-fallthrough], [WCFLAGS="-Wno-implicit-fallthroug
 AC_CC_FLAG_CHECK([-Wno-tautological-compare], [WCFLAGS="-Wno-tautological-compare $WCFLAGS"])
 AC_CC_FLAG_CHECK([-Wno-stringop-truncation], [WCFLAGS="-Wno-stringop-truncation $WCFLAGS"])
 AC_CC_FLAG_CHECK([-Wno-address-of-packed-member], [WCFLAGS="-Wno-address-of-packed-member $WCFLAGS"])
+AC_CC_FLAG_CHECK([-Wno-enum-conversion], [WCFLAGS="-Wno-enum-conversion $WCFLAGS"])
+AC_CC_FLAG_CHECK([-Wno-overflow], [WCFLAGS="-Wno-overflow $WCFLAGS"])
 AC_CC_FLAG_CHECK([-Wextra], [WCFLAGS="-Wextra $WCFLAGS"])
 AC_SUBST(WCFLAGS)
 
