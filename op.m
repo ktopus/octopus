@@ -53,6 +53,8 @@
 
 #import <mod/box/op.h>
 
+enum txn_mode mode;
+
 /**
  * @brief Вставить запись в индекс
  *
