@@ -78,18 +78,19 @@ local box_offset = ProtoField.int32("silverbox.offset", "Offset")
 local box_limit = ProtoField.int32("silverbox.limit", "Limit")
 local box_flags = ProtoField.uint32("silverbox.flags", "Flags")
 local box_count = ProtoField.uint32("silverbox.count", "Count")
-local box_tuple = ProtoField.bytes("silverbox.tuple", "Tuple", base.HEX)
+local box_tuple = ProtoField.bytes("silverbox.tuple", "Tuple", base.DASH)
 local box_tuple_cardinality = ProtoField.int32("silverbox.tuple.cardinality", "Cardinality")
 local box_tuple_blen = ProtoField.int32("silverbox.tuple.blen", "Len")
 local box_tuple_field = ProtoField.bytes("silverbox.tuple.field", "Field")
 local box_tuple_field_len = ProtoField.int32("silverbox.tuple.field.len", "Len")
 local box_tuple_field_data = ProtoField.string("silverbox.tuple.field.data", "Data")
 local box_tuple_field_datau32 = ProtoField.int32("silverbox.tuple.field.datau32", "Data")
+local box_key_count = ProtoField.uint32("silverbox.key_count", "KeyCount")
 
 box.fields = {box_objspace, box_index, box_offset, box_limit, box_flags, box_count,
               box_tuple, box_tuple_cardinality, box_tuple_blen,
               box_tuple_field, box_tuple_field_len,
-              box_tuple_field_data, box_tuple_field_datau32}
+              box_tuple_field_data, box_tuple_field_datau32, box_key_count}
 
 local function box_insert(buf, tree)
     tree:add_le(box_objspace, buf:range(0, 4))
@@ -159,6 +160,7 @@ local function box_select(buf, tree)
     tree:add_le(box_index, buf:range(4, 4))
     tree:add_le(box_offset, buf:range(8, 4))
     tree:add_le(box_limit, buf:range(12, 4))
+    tree:add_le(box_key_count, buf:range(16, 4))
     local key_count = buf:range(16, 4)
     local key_tree = tree:add(key_count, "Keys: " .. key_count:le_uint())
     buf = buf:range(20)
@@ -249,7 +251,7 @@ local function box_dissector(cmd, buf, tree)
 end
 
 iproto_data_dissector = box_dissector
-iproto_port = { ["33013"] = 1, ["3313"] = 1}
+iproto_port = { ["33013"] = 1, ["3313"] = 1, ["11000"] = 1,  ["11100"] = 1, ["11200"] = 1, ["11300"] = 1, ["11400"] = 1, ["11500"] = 1,  ["11600"] = 1,  ["11700"] = 1,  ["11800"] = 1, ["12000"] = 1, ["12100"] = 1, ["12200"] = 1 }
 
 local tcp_table = DissectorTable.get("tcp.port")
 for k, _ in pairs(iproto_port) do
