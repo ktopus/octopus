@@ -80,3 +80,12 @@ seed = NULL, ro
 
 # issue warning if running all pending events took longer
 warn_loop_time = 0.1, rw
+
+# lock all of the calling process's virtual address space into RAM, preventing that memory from being paged to the swap area.
+# need to allow to lock enough memory for octopus user
+# create /etc/security/limits.d/octopus.conf with content:
+# octopus    soft    memlock  unlimited
+# octopus    hard    memlock  unlimited
+# in systemd could be changed in /etc/systemd/user/octopus.conf value DefaultLimitMEMLOCK=
+# check limit for current user: ulimit -l
+mlock = 0, rw

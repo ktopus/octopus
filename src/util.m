@@ -43,6 +43,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <sys/mman.h>
 
 #ifdef HAVE_LIBELF
 # include <libelf.h>
@@ -526,5 +527,39 @@ const char* strerror_o(int eno)
 }
 #endif
 #endif
+
+int apply_mlockall()
+{
+
+        int sres = mlockall(MCL_CURRENT | MCL_FUTURE);
+        if (sres == -1 && errno) {
+                say_error("failed to call mlockall, reason: '%s'", strerror(errno));
+                if (errno == ENOMEM) {
+                        struct rlimit lim;
+
+                        if (getrlimit(RLIMIT_MEMLOCK, &lim) != 0) {
+
+                                say_error("failed to get RLIMIT_MEMLOCK");
+                                return -1;
+                        }
+                        say_info("user max locked memory: cur: %zu, max: %zu\n", lim.rlim_cur, lim.rlim_max);
+                }
+                return -1;
+        }
+
+        return 0;
+}
+
+int apply_munlockall()
+{
+
+        int sres = munlockall();
+        if (sres == -1 && errno) {
+                say_error("failed to call munlockall, reason: '%s'", strerror(errno));
+                return -1;
+        }
+
+        return 0;
+}
 
 register_source();

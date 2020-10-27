@@ -238,4 +238,7 @@ const char* strerror_o(int eno);
 #define strerror_o(eno) strerror(eno)
 #endif
 
+int apply_mlockall();
+int apply_munlockall();
+
 #endif
