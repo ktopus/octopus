@@ -207,6 +207,26 @@ load_cfg(struct octopus_cfg *conf, i32 check_rdonly)
 	return 0;
 }
 
+// We need to revert all changes in case of any failure inside core_reload_config
+static int
+core_reload_config(struct octopus_cfg *old_cfg, struct octopus_cfg *new_cfg)
+{
+
+        if (old_cfg->mlock == 0 && new_cfg->mlock == 1) {
+                if (apply_mlockall()) {
+                        return -1;
+                }
+        }
+        else if (old_cfg->mlock == 1 && new_cfg->mlock == 0) {
+
+                if (apply_munlockall()) {
+                        return -1;
+                }
+        }
+
+        return 0;
+}
+
 int
 reload_cfg(void)
 {
@@ -215,6 +235,8 @@ reload_cfg(void)
 
 	memset(&new_cfg1, 0, sizeof(new_cfg1));
 	memset(&new_cfg2, 0, sizeof(new_cfg2));
+
+        say_info("reload config");
 
 	// Load with checking readonly params
 	if (dup_octopus_cfg(&new_cfg1, &cfg) != 0) {
@@ -247,14 +269,23 @@ reload_cfg(void)
 	destroy_octopus_cfg(&new_cfg1);
 	old_cfg = cfg;
 	cfg = new_cfg2;
+
+        if (core_reload_config(&old_cfg, &new_cfg2) ) {
+                cfg = old_cfg;
+                destroy_octopus_cfg(&new_cfg2);
+                return -1;
+        }
+
 	foreach_module (m)
 		if (m->reload_config != NULL)
-			m->reload_config(&cfg, &new_cfg2);
+			m->reload_config(&old_cfg, &new_cfg2);
 	destroy_octopus_cfg(&old_cfg);
 
 	if (cfg_err_offt)
 		say_warn("config warnings: %s", cfg_err);
-	return 0;
+
+        say_info("reload config: OK");
+        return 0;
 }
 
 struct tnt_module *
@@ -847,6 +878,10 @@ init_storage:
 	octopus_ev_init();
 	octopus_ev_backgroud_tasks();
 	fiber_init(NULL);
+
+        if (cfg.mlock && apply_mlockall()) {
+                return 1;
+        }
 
 #if CFG_lua_path
 	/* run Lua pre_init before module init */
