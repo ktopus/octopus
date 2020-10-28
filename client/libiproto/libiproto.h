@@ -208,5 +208,6 @@ u_int32_t			li_req_state(struct iproto_request_t* r);
 void*				li_req_response_data(struct iproto_request_t* r, size_t *size);
 void*               		li_req_request_data(struct iproto_request_t* r, size_t *size);
 void				li_req_free(struct iproto_request_t* r);
+uint32_t                        li_req_sync(struct iproto_request_t* r);
 
 #endif
