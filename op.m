@@ -2670,14 +2670,14 @@ box_select_cb (struct netmsg_head* _wbuf, struct iproto* _request)
 	ev_tstamp start = 0;
 	@try
 	{
-		if (cfg.box_extended_stat && (osp->statbase > -1))
-			stat_sum_static (osp->statbase, BSS_SELECT_IDX0+indexn, 1);
-
 		//
 		// Выход номера индекса за пределы
 		//
 		if (indexn > MAX_IDX)
 			iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "index too big");
+
+                if (cfg.box_extended_stat && (osp->statbase > -1))
+			stat_sum_static (osp->statbase, BSS_SELECT_IDX0+indexn, 1);
 
 		//
 		// Индекс для выборки
