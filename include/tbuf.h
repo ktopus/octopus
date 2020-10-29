@@ -66,6 +66,7 @@ static inline int __attribute__((pure)) tbuf_free(const struct tbuf *b)
 
 struct tbuf *tbuf_alloc(struct palloc_pool *pool);
 void tbuf_ensure_resize(struct tbuf *e, size_t bytes_required);
+int tbuf_enough(struct tbuf* _e, size_t _required);
 static __attribute__((always_inline)) inline void
 tbuf_ensure(struct tbuf *e, size_t required)
 {

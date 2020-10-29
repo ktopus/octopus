@@ -91,6 +91,18 @@ tbuf_ensure_resize(struct tbuf *e, size_t required)
 	tbuf_assert(e);
 }
 
+int
+tbuf_enough (struct tbuf* _e, size_t _required)
+{
+	size_t size = tbuf_size (_e);
+	size_t req = _required - _e->free;
+	size_t diff = size/2;
+	if (diff < req)
+		diff = req + _required/2;
+
+	return (size + diff) < (256*1024*1024);
+}
+
 void
 tbuf_willneed(struct tbuf *e, size_t required)
 {
