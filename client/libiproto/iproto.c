@@ -1107,7 +1107,7 @@ li_get_ready_reqs(struct iproto_connection_t *c) {
 }
 
 
-uint32_t
+u_int32_t
 li_req_sync(struct iproto_request_t* r) {
         return r->headerSend.sync;
 }
