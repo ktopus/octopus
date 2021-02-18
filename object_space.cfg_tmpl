@@ -17,12 +17,13 @@ no_panic_on_snapshot_duplicates = 0
 
 box_extended_stat = 1
 
-# block of rows after than verify index process are paused on snap_dump_check_sleep
-# seconds. 0 - disable pause
+# block of rows after than verify index process are paused on snap_dump_check_sleep milliseconds.
+# 0 - disable pause
+# 100000 is a good starting point
 snap_dump_check_rows=0
 
-# timeout in seconds to pause verify indexes process
-snap_dump_check_sleep=0.05
+# timeout in milliseconds to pause verify indexes process
+snap_dump_check_sleep=10
 
 on_snapshot_duplicates = [
   {

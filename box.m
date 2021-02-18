@@ -59,6 +59,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sysexits.h>
+#include <time.h>
 
 static struct iproto_service box_primary;
 static struct iproto_service box_secondary;
@@ -1145,8 +1146,13 @@ verify_indexes (struct object_space* _osp, size_t _rows)
 
 			++index_rows;
 
-			if ((cfg.snap_dump_check_rows > 0) && ((index_rows%cfg.snap_dump_check_rows) == 0))
-				fiber_sleep (cfg.snap_dump_check_sleep);
+			if ((cfg.snap_dump_check_rows > 0) && ((index_rows % cfg.snap_dump_check_rows) == 0)) {
+                                struct timespec duration;
+                                //set cfg.snap_dump_check_sleep in milliseconds
+                                duration.tv_sec  = (cfg.snap_dump_check_sleep >= 1000) ? cfg.snap_dump_check_sleep / 1000 : 0;
+                                duration.tv_nsec = (cfg.snap_dump_check_sleep % 1000) * 1000000;
+                                nanosleep(&duration, NULL);
+                        }
 		}
 
 		if (_rows != index_rows)
