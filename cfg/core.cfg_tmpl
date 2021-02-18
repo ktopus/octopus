@@ -19,7 +19,7 @@ sched_affinity=NULL, ro
 # that all CPU's avaliable)
 #
 # example: "00001000000000000000000000000000"
-snapper_sched_affinity=NULL, ro
+snapper_sched_affinity=NULL
 
 # Main process priority
 # changes in range -20 -> 19
@@ -31,7 +31,7 @@ proc_priority=0,ro
 # changes in range -20 -> 19
 # in top, ps etc you will see value = 20 + snapper_proc_priority.
 # 0 value does not change priority
-snapper_proc_priority=0,ro
+snapper_proc_priority=0
 
 # Log verbosity, possible values: ERROR=1, CRIT=2, WARN=3, INFO=4(default), DEBUG=5
 log_level=4
