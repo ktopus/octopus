@@ -305,8 +305,8 @@ static typenames* many_column_types = (typenames[])
 	{SNUM64, (char*[]){"SNUM64", NULL}},
 	{UNUM16, (char*[]){"NUM16", "UNUM16", NULL}},
 	{SNUM16, (char*[]){"SNUM16", NULL}},
-	{UNUM16, (char*[]){"NUM8", "UNUM8", NULL}},
-	{SNUM16, (char*[]){"SNUM8", NULL}},
+	{UNUM8,  (char*[]){"NUM8", "UNUM8", NULL}},
+	{SNUM8,  (char*[]){"SNUM8", NULL}},
 	{UNDEF , (char*[]){NULL}},
 };
 
