@@ -16,6 +16,7 @@ struct ckv_str {
 int onlineconf_get(const char* name, const char* key, struct ckv_str* result);
 int onlineconf_get_json(const char* name, const char* key, struct ckv_str* result);
 int onlineconf_geti(const char* name, const char* key, int _default);
+int64_t onlineconf_geti64(const char* name, const char* key, int64_t _default);
 bool onlineconf_get_bool(const char* name, const char* key);
 bool onlineconf_registered(const char* name);
 ]]
@@ -40,6 +41,10 @@ end
 
 function onlineconf.geti(key, default)
     return ffi.C.onlineconf_geti(nil, key, default or -1)
+end
+
+function onlineconf.geti64(key, default)
+	return ffi.C.onlineconf_geti64(nil, key, default or -1)
 end
 
 function onlineconf.bool(key)
@@ -67,7 +72,10 @@ local kv_mt = {
         geti = function(t, key, default)
             return ffi.C.onlineconf_geti(t[kv_key], key, default or -1)
         end,
-        bool = function(t, key)
+		geti64 = function(t, key, default)
+			return ffi.C.onlineconf_geti64(t[kv_key], key, default or -1)
+		end,
+		bool = function(t, key)
             return ffi.C.onlineconf_get_bool(t[kv_key], key)
         end
     },

@@ -126,6 +126,44 @@ onlineconf_geti(const char* name, const char* key, int _default)
 	return _default;
 }
 
+int64_t
+onlineconf_geti64 (const char* name, const char* key, int64_t _default)
+{
+        struct ckv_str r = {NULL, 0};
+        if (onlineconf_get_generic (name, key, &r, NULL))
+        {
+                int64_t sum = 0;
+                int64_t neg = 1;
+
+                const char *e = r.str + r.len;
+                if (r.str == e)
+                        return _default;
+
+                switch (*r.str)
+                {
+                        case '-':
+                                neg = -1;
+
+                        case '+':
+                                ++r.str;
+
+                        default:
+                                break;
+                }
+
+                if (r.str == e)
+                        return _default;
+
+                for (; (r.str != e) && (*r.str >= '0') && (*r.str <= '9'); ++r.str)
+                        sum = sum*10 + (*r.str - '0');
+
+                if (r.str == e)
+                        return sum*neg;
+        }
+
+        return _default;
+}
+
 bool
 onlineconf_get_bool(const char* name, const char* key)
 {
