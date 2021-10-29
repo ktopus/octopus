@@ -72,10 +72,10 @@ local kv_mt = {
         geti = function(t, key, default)
             return ffi.C.onlineconf_geti(t[kv_key], key, default or -1)
         end,
-		geti64 = function(t, key, default)
-			return ffi.C.onlineconf_geti64(t[kv_key], key, default or -1)
-		end,
-		bool = function(t, key)
+        geti64 = function(t, key, default)
+            return ffi.C.onlineconf_geti64(t[kv_key], key, default or -1)
+        end,
+        bool = function(t, key)
             return ffi.C.onlineconf_get_bool(t[kv_key], key)
         end
     },
