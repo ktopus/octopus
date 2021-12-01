@@ -572,7 +572,7 @@ configure_index (int _i, int _j, Index* _pk)
 	//
 	// ... и не может быть частичным
 	//
-	if ((j == 0) && ic->relaxed)
+	if ((_j == 0) && ic->relaxed)
 		panic ("(object_space = %" PRIu32 ") object_space PK index can't be partial", _i);
 
 	//
@@ -920,7 +920,7 @@ build_secondary (struct object_space* _osp)
 			//
 			u32 t = 0;
 			[pk iterator_init];
-			while (obj = [pk iterator_next])
+			while ((obj = [pk iterator_next]))
 			{
 				//
 				// Учитываем, что индекс может быть частичным
@@ -1171,7 +1171,7 @@ prepare_tlv (struct box_txn* _tx, const struct tlv* _tlv)
  *        первичном.
  */
 static void
-verify_indexes (struct object_space* _osp, size_t _rows)
+verify_indexes (struct object_space* _osp)
 {
 	title ("snap_dump/check indexes");
 
