@@ -1210,14 +1210,14 @@ verify_indexes (struct object_space* _osp)
 			// то это ошибка
 			//
 			if (m && !index_obj)
-				say_error ("index %i of object space %i violation found at position %i (object not found in index)", index->conf.n, _osp->n, pk_rows);
+				say_error ("index %i of object space %i violation found at position %zi (object not found in index)", index->conf.n, _osp->n, pk_rows);
 
 			//
 			// Если объект не должен находиться в индексе, но находится там,
 			// то это ошибка
 			//
 			if (!m && index_obj)
-				say_error ("index %i of object space %i violation found at position %i (object found in index)", index->conf.n, _osp->n, pk_rows);
+				say_error ("index %i of object space %i violation found at position %zi (object found in index)", index->conf.n, _osp->n, pk_rows);
 		}
 
 		if ((cfg.snap_dump_check_rows > 0) && ((++pk_rows % cfg.snap_dump_check_rows) == 0))
