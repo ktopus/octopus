@@ -1189,7 +1189,7 @@ verify_indexes (struct object_space* _osp)
 	// Первичный индекс
 	//
 	Index<BasicIndex>* pk = _osp->index[0];
-	[pk interator_init];
+	[pk iterator_init];
 	while ((obj = [pk iterator_next]))
 	{
 		foreach_indexi (1, index, _osp)
