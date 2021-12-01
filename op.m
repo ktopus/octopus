@@ -545,7 +545,7 @@ object_space_replace (struct box_op* _bop, int _pk_modified, struct tnt_object* 
 		//
 		if (phi_right (index_obj) == _old_obj)
 		{
-			phi_insert (_bop, idx, index_obj, _obj);
+			phi_insert (_bop, index, index_obj, _obj);
 		}
 		//
 		// Если объекта с такими ключевыми полями в данном индексе нет (был из индекса
@@ -567,14 +567,14 @@ object_space_replace (struct box_op* _bop, int _pk_modified, struct tnt_object* 
 			// индекс или нет)
 			//
 			if (!phi_right (index_old_obj))
-				phi_insert (_bop, idx, index_old_obj, NULL);
+				phi_insert (_bop, index, index_old_obj, NULL);
 
 			//
 			// Если новая версия объекта попадает под условие включения его в
 			// индекс, то добавляем её туда
 			//
 			if (tuple_match (&index->conf, _obj))
-				phi_insert (_bop, idx, index_obj, _obj);
+				phi_insert (_bop, index, index_obj, _obj);
 		}
 	}
 }
