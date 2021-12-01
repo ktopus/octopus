@@ -36,8 +36,8 @@
  * @brief Заглушка для настройки пула распределителя памяти
  *
  * Для распределения памяти под эти два типа объектов используем один
- * и тот же пул распределяя память по наибольшему из объектов. Это
- * позволяет уменьшить фрагментацию памяти мелкими объектами
+ * и тот же пул по объекту наибольшего размера. Это позволяет уменьшить
+ * фрагментацию памяти мелкими объектами
  */
 union box_phi_union
 {
@@ -62,8 +62,8 @@ tuple_alloc (unsigned _cardinality, unsigned _size)
 	struct tnt_object* obj = NULL;
 
 	//
-	// Если данные записи могут быть упакованы компактно, то создаём
-	// компактную запись
+	// Если данные объекта могут быть упакованы компактно, то создаём
+	// компактный объект
 	//
 	if ((_cardinality < 256) && (_size < 256))
 	{
@@ -74,7 +74,7 @@ tuple_alloc (unsigned _cardinality, unsigned _size)
 		tuple->cardinality = _cardinality;
 	}
 	//
-	// Иначе создаём обычную запись
+	// Иначе создаём обычный объект
 	//
 	else
 	{
@@ -116,7 +116,7 @@ tuple_valid (struct tnt_object* _obj)
 	@try
 	{
 		//
-		// Явно заданный размер записи должен совпадать с вычисленным по распакованным полям
+		// Явно заданный размер объекта должен совпадать с вычисленным по его полям
 		//
 		return fields_bsize (tuple_cardinality (_obj), tuple_data (_obj), tuple_bsize (_obj)) == tuple_bsize (_obj);
 	}
@@ -187,12 +187,12 @@ next_field (void* _f)
 {
 	//
 	// Размер поля. Одновременно указатель _f смещается на начало
-	// данных поля записи
+	// данных поля
 	//
 	u32 size = LOAD_VARINT32 (_f);
 
 	//
-	// Следующее поле записи
+	// Следующее поле объекта
 	//
 	return (u8*)_f + size;
 }
@@ -201,18 +201,18 @@ ssize_t
 fields_bsize (u32 _cardinality, const void* _data, u32 _len)
 {
 	//
-	// Буфер для чтения данных из записи
+	// Буфер для чтения данных из объекта
 	//
 	struct tbuf tmp = TBUF (_data, _len, NULL);
 
 	//
-	// Читаем все поля записи
+	// Читаем все поля объекта
 	//
 	for (int i = 0; i < _cardinality; ++i)
 		read_field (&tmp);
 
 	//
-	// Возвращаем реальный размер записи, посчитанный по её полям
+	// Возвращаем реальный размер объекта, посчитанный по его полям
 	//
 	return tmp.ptr - _data;
 }
@@ -221,13 +221,13 @@ void*
 tuple_field (struct tnt_object* _obj, size_t _i)
 {
 	//
-	// Проверяем, что индекс поля меньше числа полей записи
+	// Проверяем, что индекс поля меньше числа полей объекта
 	//
 	if (_i >= tuple_cardinality (_obj))
 		return NULL;
 
 	//
-	// Первое поле записи
+	// Первое поле объекта
 	//
 	void* f = tuple_data (_obj);
 
@@ -254,8 +254,8 @@ net_tuple_add (struct netmsg_head* _h, struct tnt_object* _obj)
 			struct box_small_tuple* small_tuple = box_small_tuple (_obj);
 
 			//
-			// Компактная запись передаётся как обычная запись, чтобы не
-			// усложнять протокол. Память под неё распределяется в пуле
+			// Компактный объект передаётся как обычный объект, чтобы не
+			// усложнять протокол. Память под него распределяется в пуле
 			// буфера и будет удалена вместе с ним
 			//
 			struct box_tuple* tuple = net_add_alloc (_h, sizeof (struct box_tuple) + small_tuple->bsize);
@@ -268,17 +268,17 @@ net_tuple_add (struct netmsg_head* _h, struct tnt_object* _obj)
 		case BOX_TUPLE:
 		{
 			//
-			// Запись для вывода в буфер
+			// Объект для вывода в буфер
 			//
 			struct box_tuple* tuple = box_tuple (_obj);
 
 			//
-			// Полный размер записи вместе с заголовком
+			// Полный размер объекта вместе с заголовком
 			//
 			size_t size = sizeof (struct box_tuple) + tuple->bsize;
 
 			//
-			// Вывод записи в буфер
+			// Вывод объекта в буфер
 			//
 			net_add_obj_iov (_h, _obj, tuple, size);
 			break;
@@ -341,7 +341,7 @@ phi_cell_alloc (struct box_phi* _phi, struct tnt_object* _obj, struct box_op* _b
 	cell->bop  = _bop;
 
 	//
-	// Добавляем запись об изменении в список изменений индекса
+	// Добавляем запись об изменении в список изменений объекта в индексе
 	//
 	TAILQ_INSERT_TAIL (&_phi->tailq, cell, link);
 
@@ -389,6 +389,38 @@ phi_right (struct tnt_object* _obj)
 
 	assert ((_obj == NULL) || (_obj->type != BOX_PHI));
 	return _obj;
+}
+
+struct tnt_object*
+tuple_visible_left (struct tnt_object* _obj)
+{
+	return phi_left (_obj);
+}
+
+struct tnt_object*
+tuple_visible_right (struct tnt_object* _obj)
+{
+	return phi_right (_obj);
+}
+
+bool
+tuple_match (struct index_conf *_ic, struct tnt_object *_obj)
+{
+	if (_ic->relaxed > 0)
+	{
+		for (int f = 0; f < _ic->cardinality; ++f)
+		{
+			u8* f = tuple_field (_obj, _ic->field[0].index);
+			if (!f)
+				return false;
+
+			u32 len = LOAD_VARINT32 (f);
+			if (len == 0)
+				return false;
+		}
+	}
+
+	return true;
 }
 
 void

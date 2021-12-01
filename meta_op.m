@@ -33,6 +33,14 @@
 
 /**
  * @brief Создание таблицы
+ *
+ * Таблица создаётся в транзакции и будет перенесена в основной
+ * массив таблиц только при её завершении. Это позволяет сначала
+ * создать таблицу и все её индексы и таким образом выполнить все
+ * проверки и только затем перенести её в основной массив. Если на
+ * каком-то шаге возникнет ошибка создания таблицы, то она будет
+ * удалена вместе с данными транзакции и база автоматически вернётся
+ * в состояние до транзакции.
  */
 static void __attribute__((noinline))
 prepare_create_object_space (struct box_meta_txn* _tx, int _n, struct tbuf* _data)
@@ -47,7 +55,12 @@ prepare_create_object_space (struct box_meta_txn* _tx, int _n, struct tbuf* _dat
 	//
 	// Читаем конфигурацию первичного индекса
 	//
-	struct index_conf ic = {.n = 0};
+	// FIXME: для тестовой реализации частичных индексов достаточно возможности
+	//        их задать в конфиграции, а здесь что-то будем менять только когда
+	//        окончательно определимся с типом поля relaxed (надо будет менять и
+	//        методы index_conf_read и index_conf_vallidate)
+	//
+	struct index_conf ic = {.relaxed = 0, .n = 0};
 	index_conf_read (_data, &ic);
 	index_conf_validate (&ic);
 
@@ -64,10 +77,16 @@ prepare_create_object_space (struct box_meta_txn* _tx, int _n, struct tbuf* _dat
 		iproto_raise_fmt (ERR_CODE_ILLEGAL_PARAMS, "object_space %i is exists", _n);
 
 	//
-	// Первмчный индекс должен быть уникальным
+	// Первичный индекс должен быть уникальным
 	//
 	if (!ic.unique)
-		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "index must be unique");
+		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "primary index must be unique");
+
+	//
+	// Первичный индекс не может быть частичным
+	//
+	if (ic.relaxed)
+		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "primary index can't be partial");
 
 	//
 	// Создаём первичный индекс таблицы
@@ -108,7 +127,12 @@ prepare_create_index (struct box_meta_txn* _tx, struct tbuf* _data)
 	//
 	// Читаем конфигурацию индекса
 	//
-	struct index_conf ic = {.n = read_i8(_data)};
+	// FIXME: нужна реализация чтения поля relaxed. Пока считаем, что через
+	//        мета-операции создать частичные индексы нельзя, только задать
+	//        в конфигурации. Для отладки идеи частичных индексов этого
+	//        достаточно
+	//
+	struct index_conf ic = {.relaxed = 0, .n = read_i8(_data)};
 	index_conf_read (_data, &ic);
 	index_conf_validate (&ic);
 
@@ -119,7 +143,9 @@ prepare_create_index (struct box_meta_txn* _tx, struct tbuf* _data)
 		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "index already exists");
 
 	//
-	// Проверяем валидность номера индекса и его уникальность
+	// Проверяем что это вторичный индекс и дополняем его полями первичного
+	// индекса для того, чтобы можно было однозначно идентифицировать объекты
+	// в нём
 	//
 	if ((ic.n > 0) && !ic.unique)
 		index_conf_merge_unique (&ic, &_tx->object_space->index[0]->conf);
@@ -132,22 +158,21 @@ prepare_create_index (struct box_meta_txn* _tx, struct tbuf* _data)
 		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "can't create index");
 
 	//
-	// Первичный индекс таблицы, если данных в таблице нет, то больше ничего
-	// делать не надо
+	// Если данных в таблице нет, то больше ничего делать не надо
 	//
 	Index<BasicIndex>* pk = _tx->object_space->index[0];
 	if ([pk size] == 0)
 		return;
 
 	//
-	// Если для индекса задана операция включения предварительно
-	// отсортированных записей
+	// Если для индекса задана операция задания предварительно
+	// отсортированных объектов
 	//
 	struct tnt_object* obj = NULL;
 	if ([_tx->index respondsTo:@selector(set_sorted_nodes:count:)])
 	{
 		//
-		// Число записей в таблице
+		// Число объектов в таблице
 		//
 		size_t n_tuples = [pk size];
 
@@ -164,30 +189,39 @@ prepare_create_index (struct box_meta_txn* _tx, struct tbuf* _data)
 		//
 		// Идём по всем записям таблицы (по первичному индексу)
 		//
-		int i = 0;
+		int t = 0;
 		[pk iterator_init];
 		while ((obj = [pk iterator_next]))
 		{
 			//
-			// Указатель на место в памяти под новый узел
+			// Проверяем, что объект должен быть включён в индекс
 			//
-			struct index_node* node = nodes + i*n_size;
+			if (tuple_match (&ic, obj))
+			{
+				//
+				// Указатель на место в памяти под новый узел
+				//
+				struct index_node* node = nodes + t*n_size;
 
-			//
-			// Заполняем узел данными о записи
-			//
-			_tx->index->dtor (obj, node, _tx->index->dtor_arg);
+				//
+				// Заполняем узел данными о записи
+				//
+				_tx->index->dtor (obj, node, _tx->index->dtor_arg);
 
-			++i;
+				//
+				// Число инициализированных узлов индекса
+				//
+				++t;
+			}
 		}
 
-		say_debug ("n_tuples:%i", (int)n_tuples);
+		say_debug ("n_tuples:%i, indexed:%i", (int)n_tuples, t);
 
 		//
 		// Сортируем узлы индекса с одновременным поиском и печатью дубликатов
 		//
 		struct print_dups_arg arg = {.space = _tx->object_space->n, .index = ic.n};
-		if (![(Tree*)_tx->index sort_nodes:nodes count:n_tuples onduplicate:box_idx_print_dups arg:(void*)&arg])
+		if (![(Tree*)_tx->index sort_nodes:nodes count:t onduplicate:box_idx_print_dups arg:(void*)&arg])
 		{
 			free (nodes);
 
@@ -195,19 +229,22 @@ prepare_create_index (struct box_meta_txn* _tx, struct tbuf* _data)
 		}
 
 		//
-		// Включаем отсортированные узлы в индекс
+		// Создаём индекс на основе предварительно отсортированных узлов
 		//
-		[(Tree*)_tx->index set_sorted_nodes:nodes count:n_tuples];
+		[(Tree*)_tx->index set_sorted_nodes:nodes count:t];
 	}
 	else
 	{
 		//
-		// Если функция включния в индекс предварительно отсортированных узлов не
+		// Если функция включения в индекс предварительно отсортированных узлов не
 		// поддерживается, то просто вставляем записи в новый индекс из первичного
 		//
 		[pk iterator_init];
 		while ((obj = [pk iterator_next]))
-			[_tx->index replace:obj];
+		{
+			if (tuple_match (&ic, obj))
+				[_tx->index replace:obj];
+		}
 	}
 }
 
@@ -304,14 +341,12 @@ box_meta_truncate (int _id, int _n)
 	say_info ("TRUNCATE shard id:%i object_space n:%i", _id, _n);
 
 	//
-	// Удаление данных с помощью данной процедуры необходимо выполнять
-	// вне транзакции модификации данных
+	// Удаление данных с помощью данной процедуры необходимо выполнять вне
+	// транзакции модификации данных
 	//
 	// Таким образом данную функцию можно вызывать только из LUA-поцедур,
-	// которые выполняются через административный telnet-интерфейс. Таким
-	// образом мы гарантируем целостность данных
-	//
-	// FIXME: отключено для отладки
+	// которые выполняются через административный telnet-интерфейс. Этим
+	// мы гарантируем целостность данных
 	//
 	if (fiber->txn != NULL)
 		return -1;
@@ -336,7 +371,7 @@ box_meta_truncate (int _id, int _n)
 		return -4;
 
 	//
-	// Для реплик изменение мета-информации не поддерживается
+	// Для реплик полное удаление данных из таблицы не поддерживается
 	//
 	if ([box->shard is_replica])
 		return -5;
@@ -465,7 +500,7 @@ box_meta_commit (struct box_meta_txn* _tx)
 			//
 			_tx->object_space->index[(int)_tx->index->conf.n] = _tx->index;
 			//
-			// Перестраиваем список индексов
+			// Заново связываем индексы в список включая туда новый индекс
 			//
 			link_index (_tx->object_space);
 			break;
@@ -482,7 +517,8 @@ box_meta_commit (struct box_meta_txn* _tx)
 			//
 			[_tx->index free];
 			//
-			// Перестраиваем список индексов
+			// Заново связываем индексы в список исключая оттуда удалённый
+			// индекс
 			//
 			link_index (_tx->object_space);
 			break;

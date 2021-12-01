@@ -29,8 +29,8 @@ on_snapshot_duplicates = [
   {
     index = [
       {
-	# `action` could be:
-	# "DELETE" or "IGNORE"
+        # `action` could be:
+        # "DELETE" or "IGNORE"
         action = "", required
       }, rw
     ], rw
@@ -49,12 +49,19 @@ object_space = [
       {
         type = "", required
         unique = -1, required
-	on_duplicate = NULL
+        on_duplicate = NULL
+        #
+        # Если relaxed равно нулю, то все объекты безусловно будут
+        # индексироваться. Если relaxed равно единице, то будут
+        # индексироватся только те объекты, все индексируемые поля
+        # которых содержат не NULL значения
+        #
+        relaxed = 0
         key_field = [
           {
             fieldno = -1, required
             type = "", required
-	    sort_order = "ASC"
+            sort_order = "ASC"
           }, ro,  required
         ], required
       }, ro

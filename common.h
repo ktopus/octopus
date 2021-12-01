@@ -30,7 +30,7 @@
 #import <index.h>
 
 /**
- * @brief Максимальное число индексов для таблицы объектов
+ * @brief Максимальное число индексов для таблицы
  *
  * При изменении данного числа необходимо изменить соответствующее
  * определение в box.lua
@@ -40,7 +40,7 @@
 /**
  * @brief Максимально возможное число таблиц
  */
-#define OBJECT_SPACE_MAX (1024)
+#define OBJECT_SPACE_MAX 1024
 
 /**
  * @brief Тэги операций
@@ -79,7 +79,7 @@ enum tlv_tag
 //
 
 /**
- * @brief FIXME: ???
+ * @brief Команды, поддерживаемые базой данных
  */
 #define MESSAGES(_)             \
 	_(NOP, 1)                   \
@@ -116,13 +116,16 @@ enum BOX_SPACE_STAT
 };
 
 /**
- * @brief Констурирование пустого буфера, указывающего на заданную область памяти
+ * @brief Инициализация пустого буфера в заданной области памяти
+ *
+ * Буфер должен быть массивом
  */
 #define TBUF_BUF(_buf) (struct tbuf){.ptr = (_buf), .end = (_buf), .free = sizeof (_buf), .pool = NULL}
 
 /**
- * @brief Конструирование буфера, указывающего на заданную область памяти,
- *        инициализированную данными заданной длины
+ * @brief Инициализация буфера с данными заданного размера в заданной области памяти
+ *
+ * Буфер должен быть массивом
  */
 #define TBUF_BUFL(_buf, _l) (struct tbuf){.ptr = (_buf), .end = (_buf) + (_l), .free = sizeof (_buf) - (_l), .pool = NULL}
 
@@ -132,17 +135,17 @@ enum BOX_SPACE_STAT
 struct object_space
 {
 	/**
-	 * @brief Код таблицы (фактически является её именем)
+	 * @brief Целочисленный идентификатор таблицы (является её именем)
 	 */
 	int n;
 
 	/**
-	 * @brief Данный код таблицы игнорируется
+	 * @brief Таблица игнорируется при загрузке данных из снапшота
 	 */
 	bool ignored;
 
 	/**
-	 * @brief FIXME: ???
+	 * @brief Сохранять ли данные таблицы в снапшоте
 	 */
 	bool snap;
 
@@ -184,14 +187,14 @@ struct object_space
 };
 
 /**
- * @brief Цикл по индексам таблицы объектов @a _osp начиная с первого
+ * @brief Цикл по индексам таблицы @a _osp начиная с первого
  */
 #define foreach_index(_idx, _osp) \
 	for (Index<BasicIndex>* _idx = (_osp)->index[0]; _idx; _idx = (Index<BasicIndex>*)_idx->next)
 
 /**
- * @brief Цикл по индексам таблицы объектов @a _osp начиная с первого,
- *        если параметр @a i равен 0 и со второго, если @a i > 0
+ * @brief Цикл по индексам таблицы @a _osp начиная с первого, если параметр
+ *        @a i равен 0 и со второго, если @a i > 0
  */
 #define foreach_indexi(i, _idx, _osp) \
 	for (Index<BasicIndex>* _idx = ((i == 0) ? (_osp)->index[0] : (_osp)->index[0]->next); _idx; _idx = (Index<BasicIndex>*)_idx->next)
@@ -222,7 +225,7 @@ void box_stat_aggregate_named (char const* _name, int _n, double _v);
 /** @}*/
 
 /**
- * @brief Инициализация сбора статистики
+ * @brief Инициализация подсистемы сбора статистики
  */
 void box_stat_init (void);
 
