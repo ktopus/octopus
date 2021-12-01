@@ -84,7 +84,7 @@ lstr_compare(const struct index_node *na, const struct index_node *nb, void *x _
 int
 cstr_compare(const struct index_node *na, const struct index_node *nb, void *x __attribute__((unused)))
 {
-        return CMP(strcmp(na->key.ptr, nb->key.ptr), 0);
+	return CMP(strcmp(na->key.ptr, nb->key.ptr), 0);
 }
 
 
@@ -119,7 +119,8 @@ cstr_compare_desc(const struct index_node *na, const struct index_node *nb, void
 	return cstr_compare(nb, na, x);
 }
 
-static inline int addr_compare(const struct index_node *na, const struct index_node *nb)
+static inline int
+addr_compare(const struct index_node *na, const struct index_node *nb)
 {
 	if ((uintptr_t)na->obj <= 1)
 		return 0;
