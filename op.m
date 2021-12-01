@@ -428,7 +428,7 @@ object_space_insert (struct box_op* _bop, struct tnt_object* _pk_obj, struct tnt
 		// гарантируется предыдущими проверками
 		//
 		if (tuple_match (&index->conf, _obj))
-			phi_insert (_bop, idx, index_obj, _obj);
+			phi_insert (_bop, index, index_obj, _obj);
 	}
 }
 
@@ -491,8 +491,8 @@ object_space_replace (struct box_op* _bop, int _pk_modified, struct tnt_object* 
 		if (phi_right (pk_obj))
 		{
 			iproto_raise_fmt (ERR_CODE_INDEX_VIOLATION,
-								"duplicate key value violates unique index %i:%s",
-								idx->conf.n, [[idx class] name]);
+								"duplicate key value violates unique primary index %i:%s",
+								0, [[osp->index[0] class] name]);
 		}
 
 		//
