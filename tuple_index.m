@@ -348,7 +348,8 @@ cfg_box2index_conf (struct octopus_cfg_object_space_index* _c, int _sno, int _in
 	for (int i = 0; i < nelem (d->field); ++i)
 		d->field[i].index = d->fill_order[i] = d->field[i].offset = -1;
 
-	d->unique = _c->unique;
+	d->unique  = _c->unique;
+	d->relaxed = _c->relaxed;
 
 	if (eq (_c->type, "HASH"))
 		d->type = HASH;
