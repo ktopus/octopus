@@ -122,7 +122,7 @@ _safe_load_varint32 (struct tbuf* _b)
 	return v;
 }
 
-static __attribute__((always_inline)) inline u32
+static inline u32
 safe_load_varint32 (struct tbuf* _b)
 {
 	u8* p = _b->ptr;
@@ -146,7 +146,14 @@ read_field (struct tbuf* _b)
 {
 	void* p = _b->ptr;
 
-	_b->ptr += safe_load_varint32 (_b);
+	//
+	// На gcc 4.4.7, который используется по умолчанию при сборке на alei7
+	// почему-то игнорирует приращение _b->ptr внутри safe_load_varint32,
+	// если использовать конструкцию _b->ptr += safe_load_varint32 (_b).
+	// Поэтому используем промежуточную переменную
+	//
+	u32 fsz = safe_load_varint32 (_b);
+	_b->ptr += fsz;
 	if (unlikely (_b->ptr > _b->end))
 	{
 		_b->ptr = p;
