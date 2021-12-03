@@ -211,7 +211,7 @@ fields_bsize (u32 _cardinality, const void* _data, u32 _len)
 	for (int i = 0; i < _cardinality; ++i)
 	{
 		void* p = read_field (&tmp);
-		say_debug ("read_filed %d with size = %zd", i, tmp.ptr - p);
+		say_debug ("read_filed %d with size = %zd and data = %s", i, tmp.ptr - p, dump (p, tmp.ptr - p));
 	}
 
 	//
