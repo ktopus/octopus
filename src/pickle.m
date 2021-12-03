@@ -122,7 +122,7 @@ _safe_load_varint32 (struct tbuf* _b)
 	return v;
 }
 
-static inline u32
+static u32
 safe_load_varint32 (struct tbuf* _b)
 {
 	u8* p = _b->ptr;
@@ -146,15 +146,7 @@ read_field (struct tbuf* _b)
 {
 	void* p = _b->ptr;
 
-	//
-	// FIXME: здесь приходится присваивать результат работы
-	//        функции промежуточной переменной, так как внутри
-	//        safe_load_varint32 так же происходит приращение
-	//        _b->ptr, которое gcc 4.4.7 "проглатывает" если не
-	//        использовать промежуточную переменную
-	//
-	u32 fsz = safe_load_varint32 (_b);
-	_b->ptr += fsz;
+	_b->ptr += safe_load_varint32 (_b);
 	if (unlikely (_b->ptr > _b->end))
 	{
 		_b->ptr = p;
