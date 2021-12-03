@@ -414,11 +414,11 @@ tuple_match (struct index_conf *_ic, struct tnt_object *_obj)
 	{
 		for (int f = 0; f < _ic->cardinality; ++f)
 		{
-			u8* f = tuple_field (_obj, _ic->field[0].index);
-			if (!f)
+			u8* fdata = tuple_field (_obj, _ic->field[f].index);
+			if (!fdata)
 				return false;
 
-			u32 len = LOAD_VARINT32 (f);
+			u32 len = LOAD_VARINT32 (fdata);
 			if (len == 0)
 				return false;
 		}
