@@ -122,7 +122,7 @@ _safe_load_varint32 (struct tbuf* _b)
 	return v;
 }
 
-static u32
+static __attribute__((always_inline)) inline u32
 safe_load_varint32 (struct tbuf* _b)
 {
 	u8* p = _b->ptr;
