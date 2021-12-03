@@ -593,7 +593,7 @@ prepare_replace (struct box_op* _bop, size_t _cardinality, const void* _data, u3
 	// не совпадает с размером объекта, посчитанным по его полям, то
 	// это ошибка
 	//
-	say_debug ("_len = %d, fiels_bsize = %d", _len, fields_bsize (_cardinality, _data, _len));
+	say_debug ("_len = %d, fiels_bsize = %zd", _len, fields_bsize (_cardinality, _data, _len));
 	if ((_len == 0) || (fields_bsize (_cardinality, _data, _len) != _len))
 		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "tuple encoding error");
 
