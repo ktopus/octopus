@@ -567,7 +567,7 @@ object_space_replace (struct box_op* _bop, int _pk_modified, struct tnt_object* 
 			// делаем это не зависимо от того, попадает ли новая версия объекта в
 			// индекс или нет)
 			//
-			if (!phi_right (index_old_obj))
+			if (phi_right (index_old_obj))
 				phi_insert (_bop, index, index_old_obj, NULL);
 
 			//
