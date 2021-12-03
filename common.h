@@ -233,6 +233,6 @@ void box_stat_init (void);
  * @brief Отформатировать заданную область памяти во внутренний буфер в виде
  *        строки, завершающейся нулём
  */
-const char* dump (void* data, size_t _len);
+const char* dump (void* _data, size_t _len);
 
 #endif // __BOX_COMMON_H

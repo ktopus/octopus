@@ -137,7 +137,7 @@ box_stat_init (void)
 }
 
 const char*
-dump (void *data, size_t _len)
+dump (void* _data, size_t _len)
 {
 	static const char hex[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
 
