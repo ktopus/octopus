@@ -209,7 +209,10 @@ fields_bsize (u32 _cardinality, const void* _data, u32 _len)
 	// Читаем все поля объекта
 	//
 	for (int i = 0; i < _cardinality; ++i)
-		read_field (&tmp);
+	{
+		void* p = read_field (&tmp);
+		say_debug ("read_filed %d with size = %zd", i, tmp.ptr - p);
+	}
 
 	//
 	// Возвращаем реальный размер объекта, посчитанный по его полям
