@@ -1962,7 +1962,8 @@ box_prepare (struct box_txn* _txn, int _op, const void* _data, u32 _len)
 				//
 				// Выполняем операцию вставки записи
 				//
-				say_debug ("insert: bop->flags = %d, cardinality = %d, tuple_blen = %d", bop->flags, cardinality, tuple_blen);
+				say_debug ("insert: bop->flags = %d, cardinality = %d, tuple_blen = %d, data = %s",
+						   bop->flags, cardinality, tuple_blen, dump (tuple_bytes, tuple_blen));
 				prepare_replace (bop, cardinality, tuple_bytes, tuple_blen);
 
 				//

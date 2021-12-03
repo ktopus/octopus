@@ -229,4 +229,10 @@ void box_stat_aggregate_named (char const* _name, int _n, double _v);
  */
 void box_stat_init (void);
 
+/**
+ * @brief Отформатировать заданную область памяти во внутренний буфер в виде
+ *        строки, завершающейся нулём
+ */
+const char* dump (void* data, size_t _len);
+
 #endif // __BOX_COMMON_H

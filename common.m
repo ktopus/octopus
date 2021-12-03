@@ -136,4 +136,24 @@ box_stat_init (void)
 	g_stat_named_base = stat_register_named ("box");
 }
 
+const char*
+dump (void *data, size_t _len)
+{
+	static const char hex[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+
+	static char buf[1024];
+
+	char* p = buf;
+	for (size_t i = 0; (i < _len) && (p < (buf + sizeof (buf) - 1)); ++i)
+	{
+		if (p > buf)
+			*p++ = ',';
+		*p++ = hex[(_data[i] >> 4)];
+		*p++ = hex[_data[i] & 0x0F];
+	}
+
+	*p = '\0';
+	return buf;
+}
+
 register_source ();
