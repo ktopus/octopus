@@ -146,7 +146,8 @@ read_field (struct tbuf* _b)
 {
 	void* p = _b->ptr;
 
-	_b->ptr += safe_load_varint32 (_b);
+	u32 size = safe_load_varint32 (_b);
+	_b->ptr += size;
 	if (unlikely (_b->ptr > _b->end))
 	{
 		_b->ptr = p;
