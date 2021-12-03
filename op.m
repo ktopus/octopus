@@ -593,7 +593,7 @@ prepare_replace (struct box_op* _bop, size_t _cardinality, const void* _data, u3
 	// не совпадает с размером объекта, посчитанным по его полям, то
 	// это ошибка
 	//
-	say_debug ("_len = %d, fiels_bsize = %zd", _len, fields_bsize (_cardinality, _data, _len));
+	say_debug ("_len = %d, fields_bsize = %zd", _len, fields_bsize (_cardinality, _data, _len));
 	if ((_len == 0) || (fields_bsize (_cardinality, _data, _len) != _len))
 		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "tuple encoding error");
 
@@ -1951,7 +1951,7 @@ box_prepare (struct box_txn* _txn, int _op, const void* _data, u32 _len)
 				//
 				u32 cardinality = read_u32 (&buf);
 				//
-				// Размер записи
+				// Размер данных записи
 				//
 				u32 tuple_blen = tbuf_len (&buf);
 				//
@@ -1962,6 +1962,7 @@ box_prepare (struct box_txn* _txn, int _op, const void* _data, u32 _len)
 				//
 				// Выполняем операцию вставки записи
 				//
+				say_debug ("insert: bop->flags = %d, cardinality = %d, tuple_blen = %d", bop->flags, cardinality, tuple_blen);
 				prepare_replace (bop, cardinality, tuple_bytes, tuple_blen);
 
 				//
