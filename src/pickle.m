@@ -146,8 +146,15 @@ read_field (struct tbuf* _b)
 {
 	void* p = _b->ptr;
 
-	u32 size = safe_load_varint32 (_b);
-	_b->ptr += size;
+	//
+	// FIXME: здесь приходится присваивать результат работы
+	//        функции промежуточной переменной, так как внутри
+	//        safe_load_varint32 так же происходит приращение
+	//        _b->ptr, которое gcc 4.4.7 "проглатывает" если не
+	//        использовать промежуточную переменную
+	//
+	u32 fsz = safe_load_varint32 (_b);
+	_b->ptr += fsz;
 	if (unlikely (_b->ptr > _b->end))
 	{
 		_b->ptr = p;
