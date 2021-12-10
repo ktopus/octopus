@@ -83,42 +83,41 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 		//
 		// Список версий объекта
 		//
-		struct box_phi* index_phi = box_phi (_index_obj);
+		struct box_phi* index_obj = box_phi (_index_obj);
 
 		//
 		// Проверяем согласованность индекса и находящегося в нём объекта
 		//
-		assert (index_phi->index == _index);
+		assert (index_obj->index == _index);
 
 		//
 		// Добавляем в индекс запись о новой версии объекта
 		//
-		cell = phi_cell_alloc (index_phi, _obj, _bop);
+		cell = phi_cell_alloc (index_obj, _obj, _bop);
 	}
 	else
 	{
 		//
 		// Создаём список версий объекта
 		//
-		struct box_phi* index_phi = phi_alloc (_index, _index_obj, _bop);
+		struct box_phi* index_obj = phi_alloc (_index, _index_obj, _bop);
 
 		//
 		// Добавляем в него запись о новой версии объекта
 		//
-		cell = phi_cell_alloc (index_phi, _obj, _bop);
+		cell = phi_cell_alloc (index_obj, _obj, _bop);
 
 		//
 		// Замещаем объект в индексе списком его версий
 		//
 		@try
 		{
-			say_debug ("index_phi = %p, index_phi->header = %p", index_phi, &index_phi->header);
-			[_index replace: &index_phi->header];
+			[_index replace:&index_phi->header];
 		}
 		@catch (id e)
 		{
-			phi_free (index_phi);
 			phi_cell_free (cell);
+			phi_free (index_obj);
 			@throw;
 		}
 	}
@@ -445,20 +444,21 @@ object_space_insert (struct box_op* _bop, struct tnt_object* _pk_obj, struct tnt
  * @param[in] _obj новая версия объекта
  */
 static void
-object_space_replace (struct box_op* _bop, int _pk_modified, struct tnt_object* _pk_old_obj, struct tnt_object* _old_obj, struct tnt_object* _obj)
+object_space_replace (struct box_op* _bop, int _pk_modified, struct tnt_object* _pk_index_old_obj, struct tnt_object* _old_obj, struct tnt_object* _obj)
 {
 	//
 	// Поскольку это операция замещения, то должны существовать обе
 	// версии объекта и старая и новая
 	//
-	assert (_pk_old_obj && _old_obj);
+	assert (_pk_index_old_obj);
+	assert (_old_obj);
 	assert (_obj);
 
 	//
 	// Предыдущая версия объекта в первичном индексе должна совпадать
 	// с переданной предыдущей версией
 	//
-	assert (phi_right (_pk_old_obj) == _old_obj);
+	assert (phi_right (_pk_index_old_obj) == _old_obj);
 
 	//
 	// Модифицируемая таблица
@@ -472,7 +472,7 @@ object_space_replace (struct box_op* _bop, int _pk_modified, struct tnt_object* 
 	//
 	if (!_pk_modified)
 	{
-		phi_insert (_bop, osp->index[0], _pk_old_obj, _obj);
+		phi_insert (_bop, osp->index[0], _pk_index_old_obj, _obj);
 	}
 	else
 	{
@@ -484,14 +484,14 @@ object_space_replace (struct box_op* _bop, int _pk_modified, struct tnt_object* 
 		// не совпадают с полями первичного ключа старой версии объекта, то
 		// это гарантированно должен быть объект, отличный от старого
 		//
-		struct tnt_object* pk_obj = [osp->index[0] find_obj:_obj];
+		struct tnt_object* pk_index_obj = [osp->index[0] find_obj:_obj];
 
 		//
 		// Если такой объект был найден и его последняя версия актуальна, то
 		// диагностируем ошбку - попытка добавить в таблицу объект с неуникальным
 		// первичным ключём
 		//
-		if (phi_right (pk_obj))
+		if (phi_right (pk_index_obj))
 		{
 			iproto_raise_fmt (ERR_CODE_INDEX_VIOLATION,
 								"duplicate key value violates unique primary index %i:%s",
@@ -501,11 +501,11 @@ object_space_replace (struct box_op* _bop, int _pk_modified, struct tnt_object* 
 		//
 		// Удаляем из индекса предыдущую версию объекта
 		//
-		phi_insert (_bop, osp->index[0], _pk_old_obj, NULL);
+		phi_insert (_bop, osp->index[0], _pk_index_old_obj, NULL);
 		//
 		// Добавляем в индекс новую версию объекта
 		//
-		phi_insert (_bop, osp->index[0], pk_obj, _obj);
+		phi_insert (_bop, osp->index[0], pk_index_obj, _obj);
 	}
 
 	//
