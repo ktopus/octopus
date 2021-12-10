@@ -520,6 +520,7 @@ object_space_replace (struct box_op* _bop, int _pk_modified, struct tnt_object* 
 		// уникальным и контролировать наличие в индексе конкретного объекта
 		//
 		struct tnt_object* index_obj = [index find_obj:_obj];
+		say_debug ("index_obj = %p, phi_right(index_obj) = %p, _obj = %p", index_obj, phi_right (index_obj), _obj);
 
 		//
 		// Если объект в индексе существует и содержит актуальную версию объекта,
