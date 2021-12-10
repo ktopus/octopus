@@ -112,7 +112,8 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 		//
 		@try
 		{
-			[_index replace: (struct tnt_object*)index_phi];
+			say_debug ("index_phi = %p, index_phi->header = %p", index_phi, index_phi->header);
+			[_index replace: &index_phi->header];
 		}
 		@catch (id e)
 		{
@@ -265,8 +266,9 @@ phi_rollback (struct box_phi_cell* _cell)
 		// Если до начала транзакции объекта не существовало, то просто удаляем список
 		// версий объекта из индекса
 		//
+		say_debug ("index_phi = %p, index_phi->header = %p", index_phi, index_phi->header);
 		if (index_phi->obj == NULL)
-			[index_phi->index remove:(struct tnt_object*)index_phi];
+			[index_phi->index remove:&index_phi->header];
 		//
 		// Если объект существовал до начала транзакции, то вставляем его изначальную
 		// версию в индекс вместо списка версий
