@@ -544,7 +544,9 @@ object_space_replace (struct box_op* _bop, int _pk_modified, struct tnt_object* 
 		// уникальным и контролировать наличие в индексе конкретного объекта
 		//
 		struct tnt_object* index_obj = [index find_obj:_obj];
-		say_debug ("index_obj = %p, phi_right(index_obj) = %p, _obj = %p", index_obj, phi_right (index_obj), _obj);
+
+		say_debug ("index = %d, index_obj = %p, phi_right(index_obj) = %p, _obj = %p",
+				   index->conf.n, index_obj, phi_right (index_obj), _obj);
 
 		//
 		// Если объект в индексе существует и содержит актуальную версию объекта,
@@ -569,7 +571,6 @@ object_space_replace (struct box_op* _bop, int _pk_modified, struct tnt_object* 
 		// включения данного объекта в индекс, если он условный. Так что дополнительно
 		// можно ничего не проверять и просто добавить в индекс новую версию объекта
 		//
-		say_debug ("phi_right(index_obj) = %p, _old_obj = %p", phi_right (index_obj), _old_obj);
 		if (phi_right (index_obj) == _old_obj)
 		{
 			phi_insert (_bop, index, index_obj, _obj);
@@ -584,7 +585,8 @@ object_space_replace (struct box_op* _bop, int _pk_modified, struct tnt_object* 
 			// Ищем в индексе предыдущую версию объекта
 			//
 			struct tnt_object* index_old_obj = [index find_obj:_old_obj];
-			say_debug ("index_old_obj = %p, phi_right(index_old_obj) = %p, _old_obj = %p", index_old_obj, phi_right (index_old_obj), _old_obj);
+			say_debug ("index = %d, index_old_obj = %p, phi_right(index_old_obj) = %p, _old_obj = %p",
+					   index->conf.n, index_old_obj, phi_right (index_old_obj), _old_obj);
 
 			//
 			// Если такая версия есть и она актуальна (поскольку индекс может быть
