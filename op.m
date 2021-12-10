@@ -129,7 +129,11 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 	// Добавляем информацию о новой версии объекта в список версий объекта для
 	// для индексов, изменённых данной операцией
 	//
+	say_debug3 ("%s(0): cell:%p index:%d index_obj:%p TAILQ_FIRST(&index_obj->tailq):%p obj:%p",
+				__func__, cell, cell->head->index->conf.n, cell->head, TAILQ_FIRST (&cell->head->tailq), cell->obj);
 	TAILQ_INSERT_TAIL (&_bop->phi, cell, bop_link);
+	say_debug3 ("%s(1): cell:%p index:%d index_obj:%p TAILQ_FIRST(&index_obj->tailq):%p obj:%p",
+				__func__, cell, cell->head->index->conf.n, cell->head, TAILQ_FIRST (&cell->head->tailq), cell->obj);
 }
 
 /**
