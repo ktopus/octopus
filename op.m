@@ -138,7 +138,7 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 static void
 phi_commit (struct box_phi_cell* _cell)
 {
-	say_debug3 ("%s: cell:%p index:%d index_obj:%p TAILQ_FIRST(&index_obj->tailq): obj:%p",
+	say_debug3 ("%s: cell:%p index:%d index_obj:%p TAILQ_FIRST(&index_obj->tailq):%p obj:%p",
 				__func__, _cell, _cell->head->index->conf.n, _cell->head, TAILQ_FIRST (&_cell->head->tailq), _cell->obj);
 
 	//
