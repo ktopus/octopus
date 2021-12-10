@@ -2182,7 +2182,9 @@ box_op_commit (struct box_op* _bop)
 	TAILQ_FOREACH_SAFE (cell, &_bop->phi, bop_link, tmp)
 	{
 		say_debug3 ("%s: cell:%p index:%d index_obj:%p obj:%p", __func__, cell, cell->head->index->conf.n, cell->head, cell->obj);
-
+	}
+	TAILQ_FOREACH_SAFE (cell, &_bop->phi, bop_link, tmp)
+	{
 		//
 		// Подтверждаем изменение и удаляем его из списка,
 		// привязанного к операции
