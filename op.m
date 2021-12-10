@@ -136,43 +136,43 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 static void
 phi_commit (struct box_phi_cell* _cell)
 {
-	say_debug3 ("%s: cell:%p phi:%p obj:%p", __func__, _cell, _cell->head, _cell->obj);
+	say_debug3 ("%s: cell:%p index:%d index_obj:%p obj:%p", __func__, _cell, _cell->head->index->conf.n, _cell->head, _cell->obj);
 
 	//
 	// Список версий объекта, в котором находится данная версия
 	//
-	struct box_phi* index_phi = _cell->head;
+	struct box_phi* index_obj = _cell->head;
 
 	//
 	// Проверяем, что данная версия является самой первой в списке версий
 	//
 	// Коммитить версии из середины списка нельзя
 	//
-	assert (_cell == TAILQ_FIRST (&index_phi->tailq));
+	assert (_cell == TAILQ_FIRST (&index_obj->tailq));
 	//
 	// Объект должен существовать либо до либо после либо и до и после операции
 	//
 	// Нельзя два раза подряд удалить один и тот же объект
 	//
-	assert ((index_phi->obj != NULL) || (_cell->obj != NULL));
+	assert ((index_obj->obj != NULL) || (_cell->obj != NULL));
 
 	//
 	// Если это последняя версия объекта в списке
 	//
-	if (_cell == TAILQ_LAST (&index_phi->tailq, phi_tailq))
+	if (_cell == TAILQ_LAST (&index_obj->tailq, phi_tailq))
 	{
 		//
 		// Если операция удалила объект из индекса, то удаляем весь список
 		// версий из индекса
 		//
 		if (_cell->obj == NULL)
-			[index_phi->index remove:&index_phi->header];
+			[index_obj->index remove:&index_obj->header];
 		//
 		// Если операция добавила или обновила объект, то замещаем список
 		// версий в индексе финальной версией объекта
 		//
 		else
-			[index_phi->index replace:_cell->obj];
+			[index_obj->index replace:_cell->obj];
 
 		//
 		// Удаляем список версий объекта в индексе из памяти, он больше не нужен
@@ -181,7 +181,7 @@ phi_commit (struct box_phi_cell* _cell)
 		// и будет удалена вместе с ней. Из списка версий объекта в индексе её тоже не
 		// удаляем, так как удаляется сам список
 		//
-		phi_free (index_phi);
+		phi_free (index_obj);
 	}
 	//
 	// Если это не последняя версия объекта в индексе
@@ -202,12 +202,12 @@ phi_commit (struct box_phi_cell* _cell)
 		// Саму версию объекта из памяти не удаляем, так как она принадлежит операции
 		// и будет удалена вместе с ней
 		//
-		index_phi->obj = _cell->obj;
+		index_obj->obj = _cell->obj;
 
 		//
 		// Удаляем версию объекта из списка версий объекта в индексе
 		//
-		TAILQ_REMOVE (&index_phi->tailq, _cell, link);
+		TAILQ_REMOVE (&index_obj->tailq, _cell, link);
 	}
 }
 
