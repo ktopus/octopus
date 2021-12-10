@@ -326,7 +326,7 @@ phi_alloc (Index<BasicIndex>* _index, struct tnt_object* _obj, struct box_op* _b
 }
 
 struct box_phi_cell*
-phi_cell_alloc (struct box_phi* _phi, struct tnt_object* _obj, struct box_op* _bop)
+phi_cell_alloc (struct box_phi* _index_obj, struct tnt_object* _obj, struct box_op* _bop)
 {
 	//
 	// Получаем блок памяти из фиксированного slab-кэша
@@ -340,16 +340,16 @@ phi_cell_alloc (struct box_phi* _phi, struct tnt_object* _obj, struct box_op* _b
 	//
 	// Заполняем поля
 	//
-	cell->head = _phi;
+	cell->head = _index_obj;
 	cell->obj  = _obj;
 	cell->bop  = _bop;
 
 	//
 	// Добавляем запись об изменении в список изменений объекта в индексе
 	//
-	TAILQ_INSERT_TAIL (&_phi->tailq, cell, link);
+	TAILQ_INSERT_TAIL (&_index_obj->tailq, cell, link);
 
-	say_debug3 ("%s: %p phi:%p obj:%p", __func__, cell, _phi, _obj);
+	say_debug3 ("%s: cell:%p index:%d index_obj:%p obj:%p", __func__, cell, cell->head->index->conf.n, _index_obj, _obj);
 	return cell;
 }
 
