@@ -219,7 +219,7 @@ phi_commit (struct box_phi_cell* _cell)
 static void
 phi_rollback (struct box_phi_cell* _cell)
 {
-	say_debug3 ("%s: cell:%p phi:%p obj:%p", __func__, _cell, _cell->head, _cell->obj);
+	say_debug3 ("%s: cell:%p index:%d index_obj:%p obj:%p", __func__, _cell, _cell->head->index->conf.n, _cell->head, _cell->obj);
 
 	//
 	// Список версий объекта в индексе, в котором находится данная версий
@@ -2181,6 +2181,8 @@ box_op_commit (struct box_op* _bop)
 	struct box_phi_cell* tmp;
 	TAILQ_FOREACH_SAFE (cell, &_bop->phi, bop_link, tmp)
 	{
+		say_debug3 ("%s: cell:%p index:%d index_obj:%p obj:%p", __func__, cell, cell->head->index->conf.n, cell->head, cell->obj);
+
 		//
 		// Подтверждаем изменение и удаляем его из списка,
 		// привязанного к операции
