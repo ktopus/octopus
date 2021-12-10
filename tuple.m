@@ -321,7 +321,8 @@ phi_alloc (Index<BasicIndex>* _index, struct tnt_object* _obj, struct box_op* _b
 	head->bop         = _bop;
 	TAILQ_INIT (&head->tailq);
 
-	say_debug3 ("%s: %p index:%i obj:%p", __func__, head, _index->conf.n, _obj);
+	say_debug3 ("%s: head:%p index:%d obj:%p TAILQ_FIRST(&index_obj->tailq):%p",
+				__func__, head, _index->conf.n, _obj, TAILQ_FIRST(&head->tailq));
 	return head;
 }
 
