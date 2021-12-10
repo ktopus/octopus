@@ -2182,7 +2182,8 @@ box_op_commit (struct box_op* _bop)
 	struct box_phi_cell* tmp;
 	TAILQ_FOREACH_SAFE (cell, &_bop->phi, bop_link, tmp)
 	{
-		say_debug3 ("%s: cell:%p index:%d index_obj:%p obj:%p", __func__, cell, cell->head->index->conf.n, cell->head, cell->obj);
+		say_debug3 ("%s: cell:%p index:%d index_obj:%p TAILQ_FIRST(&index_obj->tailq):%p obj:%p",
+					__func__, cell, cell->head->index->conf.n, cell->head, TAILQ_FIRST (&cell->head->tailq), cell->obj);
 	}
 	TAILQ_FOREACH_SAFE (cell, &_bop->phi, bop_link, tmp)
 	{
