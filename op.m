@@ -100,6 +100,9 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 		//
 		// Создаём список версий объекта
 		//
+		// Это первая операция над индексом в транзакции, поэтому в индексе
+		// пока находится обычный объект
+		//
 		struct box_phi* index_obj = phi_alloc (_index, _index_obj, _bop);
 
 		//
@@ -112,7 +115,7 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 		//
 		@try
 		{
-			[_index replace:&index_phi->header];
+			[_index replace:&index_obj->header];
 		}
 		@catch (id e)
 		{
