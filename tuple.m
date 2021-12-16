@@ -321,8 +321,7 @@ phi_alloc (Index<BasicIndex>* _index, struct tnt_object* _obj, struct box_op* _b
 	phi->bop         = _bop;
 	TAILQ_INIT (&phi->cells);
 
-	say_debug3 ("%s: index:%d phi:%p TAILQ_FIRST(&phi->cells):%p obj:%p",
-				__func__, _index->conf.n, phi, TAILQ_FIRST(&phi->cells), _obj);
+	say_debug3 ("%s: index:%d phi:%p obj:%p", __func__, _index->conf.n, phi, _obj);
 	return phi;
 }
 
@@ -412,22 +411,29 @@ tuple_visible_right (struct tnt_object* _obj)
 bool
 tuple_match (struct index_conf *_ic, struct tnt_object *_obj)
 {
-	say_debug ("%s: index:%d relaxed:%d _obj:%p", __func__, _ic->n, _ic->relaxed, _obj);
+	bool result = true;
 	if (_ic->relaxed > 0)
 	{
 		for (int f = 0; f < _ic->cardinality; ++f)
 		{
 			u8* fdata = tuple_field (_obj, _ic->field[f].index);
 			if (!fdata)
-				return false;
+			{
+				result = false;
+				break;
+			}
 
 			u32 len = LOAD_VARINT32 (fdata);
 			if (len == 0)
-				return false;
+			{
+				result = false;
+				break;
+			}
 		}
 	}
 
-	return true;
+	say_debug3 ("%s: index:%d relaxed:%d _obj:%p, result:%d", __func__, _ic->n, _ic->relaxed, _obj, result);
+	return result;
 }
 
 void
