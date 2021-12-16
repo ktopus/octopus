@@ -410,7 +410,7 @@ tuple_match (struct index_conf *_ic, struct tnt_object *_obj)
 	assert (_obj->type != BOX_PHI);
 
 	bool result = true;
-	if (_ic->relaxed > 0)
+	if (_ic->notnull > 0)
 	{
 		for (int f = 0; f < _ic->cardinality; ++f)
 		{
@@ -430,8 +430,8 @@ tuple_match (struct index_conf *_ic, struct tnt_object *_obj)
 		}
 	}
 
-	say_debug3 ("%s: index:%d relaxed:%d _obj:%p, dump(_obj):%s, result:%d",
-				__func__, _ic->n, _ic->relaxed, _obj, dump (tuple_data (_obj), tuple_bsize (_obj)), result);
+	say_debug3 ("%s: index:%d notnull:%d _obj:%p, dump(_obj):%s, result:%d",
+				__func__, _ic->n, _ic->notnull, _obj, dump (tuple_data (_obj), tuple_bsize (_obj)), result);
 	return result;
 }
 

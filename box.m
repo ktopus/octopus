@@ -572,8 +572,8 @@ configure_index (int _i, int _j, Index* _pk)
 	//
 	// ... и не может быть частичным
 	//
-	if ((_j == 0) && ic->relaxed)
-		panic ("(object_space = %" PRIu32 ") object_space PK index can't be relaxed", _i);
+	if ((_j == 0) && ic->notnull)
+		panic ("(object_space = %" PRIu32 ") object_space PK index can't be notnull", _i);
 
 	//
 	// Для остальных неуникальных индексов добавляем в них поля

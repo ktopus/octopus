@@ -80,8 +80,8 @@ prepare_create_object_space (struct box_meta_txn* _tx, int _n, struct tbuf* _dat
 	//
 	// Первичный индекс не может быть частичным
 	//
-	if (ic.relaxed)
-		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "primary index can't be partial");
+	if (ic.notnull)
+		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "primary index can't be notnull");
 
 	//
 	// Создаём первичный индекс таблицы
@@ -121,11 +121,6 @@ prepare_create_index (struct box_meta_txn* _tx, struct tbuf* _data)
 
 	//
 	// Читаем конфигурацию индекса
-	//
-	// FIXME: нужна реализация чтения поля relaxed. Пока считаем, что через
-	//        мета-операции создать частичные индексы нельзя, только задать
-	//        в конфигурации. Для отладки идеи частичных индексов этого
-	//        достаточно
 	//
 	struct index_conf ic = {.n = read_i8(_data)};
 	index_conf_read (_data, &ic);
