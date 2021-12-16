@@ -350,8 +350,8 @@ phi_cell_alloc (struct box_phi* _index_obj, struct tnt_object* _obj, struct box_
 	//
 	TAILQ_INSERT_TAIL (&_index_obj->tailq, cell, link);
 
-	say_debug3 ("%s: cell:%p index:%d cell:%p TAILQ_FIRST(&index_obj->tailq):%p obj:%p",
-				__func__, cell, cell->head->index->conf.n, cell->head, TAILQ_FIRST (&cell->head->tailq), cell->obj);
+	say_debug3 ("%s: index:%d _index_obj:%p cell:%p TAILQ_FIRST(&index_obj->tailq):%p obj:%p",
+				__func__, cell->head->index->conf.n, cell->head, cell, TAILQ_FIRST (&cell->head->tailq), cell->obj);
 	return cell;
 }
 
