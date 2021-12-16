@@ -125,7 +125,7 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 								__func__, cell0->phi->index->conf.n, cell0, cell0->phi, TAILQ_FIRST (&cell0->phi->cells), cell0->obj);
 				}
 			}
-			[_index replace:&phi->header];
+			[_index replace:(struct tnt_object*)phi];
 			{
 				struct box_phi_cell* cell0;
 				TAILQ_FOREACH (cell0, &_bop->cells, bop_link)
@@ -187,7 +187,7 @@ phi_commit (struct box_phi_cell* _cell)
 		// версий из индекса
 		//
 		if (_cell->obj == NULL)
-			[phi->index remove:&phi->header];
+			[phi->index remove:(struct tnt_object*)phi];
 		//
 		// Если операция добавила или обновила объект, то замещаем список
 		// версий в индексе финальной версией объекта
