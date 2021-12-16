@@ -181,6 +181,8 @@ phi_commit (struct box_phi_cell* _cell)
 	//
 	if (_cell == TAILQ_LAST (&phi->cells, phi_cells))
 	{
+		say_debug3 ("%s: obj:%p", __func__, _cell->obj);
+
 		//
 		// Если операция удалила объект из индекса, то удаляем весь список
 		// версий из индекса
@@ -276,6 +278,8 @@ phi_rollback (struct box_phi_cell* _cell)
 	//
 	else
 	{
+		say_debug3 ("%s: obj:%p", __func__, phi->obj);
+
 		//
 		// Последней версией объекта в списке присутствует операция удаления объекта
 		// которого не было до начала транзакции. Такого быть не должно, это ошибка
@@ -288,7 +292,7 @@ phi_rollback (struct box_phi_cell* _cell)
 		// версий объекта из индекса
 		//
 		if (phi->obj == NULL)
-			[phi->index remove:&phi->header];
+			[phi->index remove:(struct tnt_object*)phi];
 		//
 		// Если объект существовал до начала транзакции, то вставляем его изначальную
 		// версию в индекс вместо списка версий
