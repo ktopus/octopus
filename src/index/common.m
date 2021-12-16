@@ -746,7 +746,7 @@ index_conf_read(struct tbuf *data, struct index_conf *c)
 	c->cardinality = read_u8(data);
 	c->type = read_i8(data);
 	c->unique = read_u8(data);
-	c->relaxed = (version >= 0x11) ? read_u8 (data) : 0;
+	c->notnull = (version >= 0x11) ? read_u8 (data) : 0;
 
 	if (c->cardinality > nelem(c->field))
 		index_raise("index_conf.cardinality is too big");
@@ -804,8 +804,8 @@ index_sort_order(enum index_sort_order t)
 void
 index_conf_print(struct tbuf *out, const struct index_conf *c)
 {
-	tbuf_printf(out, "i:%i min_tuple_cardinality:%i cardinality:%i type:%s unique:%i relaxed:%i",
-			c->n, c->min_tuple_cardinality, c->cardinality, index_type(c->type), c->unique, c->relaxed);
+	tbuf_printf(out, "i:%i min_tuple_cardinality:%i cardinality:%i type:%s unique:%i notnull:%i",
+			c->n, c->min_tuple_cardinality, c->cardinality, index_type(c->type), c->unique, c->notnull);
 	for (int i = 0; i < c->cardinality; i++)
 		tbuf_printf(out, " field%i:{index:%i type:%s sort:%s}", i,
 			    c->field[i].index, index_field_type(c->field[i].type),
@@ -815,14 +815,14 @@ index_conf_print(struct tbuf *out, const struct index_conf *c)
 void
 index_conf_write(struct tbuf *data, struct index_conf *c)
 {
-	char version = (c->relaxed == 0) ? 0x10 : 0x11;
+	char version = (c->notnull == 0) ? 0x10 : 0x11;
 	write_i8(data, version);
 
 	write_i8(data, c->cardinality);
 	write_i8(data, c->type);
 	write_i8(data, c->unique);
 	if (version >= 0x11)
-		write_i8(data, c->relaxed);
+		write_i8(data, c->notnull);
 
 	for (int i = 0; i < c->cardinality; i++) {
 		write_i8(data, c->field[i].index);

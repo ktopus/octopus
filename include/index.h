@@ -90,8 +90,8 @@ struct index_conf {
 	     cardinality;
 	char type;
 	bool unique;
-	bool relaxed; /* будут ли индексироваться объекты с NULL значениями
-					 индексируемых полей */
+	bool notnull; /* будут ли индексироваться объекты с NULL значениями индексируемых
+					 полей (notnull == 0) или не будут (notnull != 0) */
 	char n;
 	char fill_order[8]; /* indexes of field[] ordered as they appear in tuple,
 			       used by sequential scan in box_tuple_gen_dtor */
