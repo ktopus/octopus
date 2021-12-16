@@ -61,8 +61,8 @@
 		struct box_phi_cell* xxx_cell; \
 		TAILQ_FOREACH (xxx_cell, &(_bop)->cells, bop_link) \
 		{ \
-			struct tnt_object* prev_obj = TAILQ_PREV (&xxx_cell->phi->cells, box_phi_cell, phi_link) ? \
-					TAILQ_PREV (&xxx_cell->phi->cells, box_phi_cell, phi_link)->obj : xxx_cell->phi->obj; \
+			struct tnt_object* prev_obj = TAILQ_PREV (xxx_cell, phi_cells, phi_link) ? \
+					TAILQ_PREV (xxx_cell, phi_cells, phi_link)->obj : xxx_cell->phi->obj; \
 			say_debug3 ("%s[bop cells]: index:%d cell:%p phi:%p prev obj:%p obj:%p", \
 						__func__, xxx_cell->phi->index->conf.n, xxx_cell, xxx_cell->phi, prev_obj, xxx_cell->obj); \
 		} \
