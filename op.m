@@ -543,9 +543,6 @@ object_space_replace (struct box_op* _bop, int _pk_modified, struct tnt_object* 
 		//
 		struct tnt_object* index_obj = [index find_obj:_obj];
 
-		say_debug ("%s: index:%d index_obj:%p phi_right(index_obj):%p _obj:%p",
-				   __func__, index->conf.n, index_obj, phi_right (index_obj), _obj);
-
 		//
 		// Если объект в индексе существует и содержит актуальную версию объекта,
 		// совпадающего по ключевым полям индекса с новым объектом, но при этом
@@ -583,8 +580,6 @@ object_space_replace (struct box_op* _bop, int _pk_modified, struct tnt_object* 
 			// Ищем в индексе предыдущую версию объекта
 			//
 			struct tnt_object* index_old_obj = [index find_obj:_old_obj];
-			say_debug ("%s: index:%d index_old_obj:%p phi_right(index_old_obj):%p _old_obj:%p",
-					   __func__, index->conf.n, index_old_obj, phi_right (index_old_obj), _old_obj);
 
 			//
 			// Если такая версия есть и она актуальна (поскольку индекс может быть
