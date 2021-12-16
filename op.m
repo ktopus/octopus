@@ -138,7 +138,7 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 		@catch (id e)
 		{
 			phi_cell_free (cell);
-			phi_free (index_phi);
+			phi_free (phi);
 			@throw;
 		}
 	}
@@ -262,7 +262,7 @@ phi_rollback (struct box_phi_cell* _cell)
 		// В списке присутствует удаление два раза подряд одного и того же объекта.
 		// Такого быть не должно, это ошибка кода, поэтому ассертимся
 		//
-		assert ((TAILQ_PREV (_cell, phi_tailq, link)->obj != NULL) || (_cell->obj != NULL));
+		assert ((TAILQ_PREV (_cell, phi_cells, link)->obj != NULL) || (_cell->obj != NULL));
 
 		//
 		// Просто удаляем версию объекта из списка делая актуальным предущее изменение.
