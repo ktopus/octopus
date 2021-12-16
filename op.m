@@ -66,7 +66,7 @@
 static void
 phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _index_obj, struct tnt_object* _obj)
 {
-	say_debug3 ("_bop%p _index:%d, _index_obj:%p, _obj:%p", _bop, _index->conf.n, _index_obj, _obj);
+	say_debug3 ("%s: _bop:%p _index:%d, _index_obj:%p, _obj:%p", __func__, _bop, _index->conf.n, _index_obj, _obj);
 
 	assert ((_index_obj != NULL) || (_obj != NULL));
 	assert ((_obj == NULL) || (_obj->type != BOX_PHI));
