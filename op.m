@@ -53,6 +53,16 @@
 
 #import <mod/box/op.h>
 
+#define TRACE_BOP_CELLS(_bop) \
+	{ \
+		struct box_phi_cell* xxx_cell; \
+		TAILQ_FOREACH (xxx_cell, &(_bop)->cells, bop_link) \
+		{ \
+			say_debug3 ("%s: index:%d cell:%p phi:%p TAILQ_FIRST(&phi->cells):%p obj:%p", \
+						__func__, xxx_cell->phi->index->conf.n, xxx_cell, xxx_cell->phi, TAILQ_FIRST (&xxx_cell->phi->cells), xxx_cell->obj); \
+		} \
+	}
+
 /**
  * @brief Вставить запись об изменении объекта в индекс
  *
@@ -117,23 +127,7 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 		//
 		@try
 		{
-			{
-				struct box_phi_cell* cell0;
-				TAILQ_FOREACH (cell0, &_bop->cells, bop_link)
-				{
-					say_debug3 ("%s: index:%d cell:%p phi:%p TAILQ_FIRST(&phi->cells):%p obj:%p",
-								__func__, cell0->phi->index->conf.n, cell0, cell0->phi, TAILQ_FIRST (&cell0->phi->cells), cell0->obj);
-				}
-			}
 			[_index replace:(struct tnt_object*)phi];
-			{
-				struct box_phi_cell* cell0;
-				TAILQ_FOREACH (cell0, &_bop->cells, bop_link)
-				{
-					say_debug3 ("%s: index:%d cell:%p phi:%p TAILQ_FIRST(&phi->cells):%p obj:%p",
-								__func__, cell0->phi->index->conf.n, cell0, cell0->phi, TAILQ_FIRST (&cell0->phi->cells), cell0->obj);
-				}
-			}
 		}
 		@catch (id e)
 		{
@@ -156,8 +150,8 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 static void
 phi_commit (struct box_phi_cell* _cell)
 {
-	say_debug3 ("%s: cell:%p index:%d index_obj:%p TAILQ_FIRST(&index_obj->tailq):%p obj:%p",
-				__func__, _cell, _cell->phi->index->conf.n, _cell->phi, TAILQ_FIRST (&_cell->phi->cells), _cell->obj);
+	say_debug3 ("%s: index:%d phi:%p cell:%p TAILQ_FIRST(&phi->cells):%p obj:%p",
+				__func__, _cell->phi->index->conf.n, _cell->phi, _cell, TAILQ_FIRST (&_cell->phi->cells), _cell->obj);
 
 	//
 	// Список версий объекта, в котором находится данная версия
@@ -238,7 +232,8 @@ phi_commit (struct box_phi_cell* _cell)
 static void
 phi_rollback (struct box_phi_cell* _cell)
 {
-	say_debug3 ("%s: cell:%p index:%d index_obj:%p obj:%p", __func__, _cell, _cell->phi->index->conf.n, _cell->phi, _cell->obj);
+	say_debug3 ("%s: index:%d phi:%p cell:%p TAILQ_LAST(&phi->cells):%p obj:%p",
+				__func__, _cell->phi->index->conf.n, _cell->phi, _cell, TAILQ_LAST (&_cell->phi->cells, phi_cells), _cell->obj);
 
 	//
 	// Список версий объекта в индексе, в котором находится данная версий
@@ -287,7 +282,6 @@ phi_rollback (struct box_phi_cell* _cell)
 		// Если до начала транзакции объекта не существовало, то просто удаляем список
 		// версий объекта из индекса
 		//
-		say_debug ("index_phi = %p, index_phi->header = %p", phi, &phi->header);
 		if (phi->obj == NULL)
 			[phi->index remove:&phi->header];
 		//
@@ -364,6 +358,8 @@ object_space_delete (struct box_op* _bop, struct tnt_object* _pk_obj, struct tnt
 		if (phi_right (index_obj))
 			phi_insert (_bop, index, index_obj, NULL);
 	}
+
+	TRACE_BOP_CELLS (_bop);
 }
 
 /**
@@ -454,6 +450,8 @@ object_space_insert (struct box_op* _bop, struct tnt_object* _pk_obj, struct tnt
 			phi_insert (_bop, index, index_obj, _obj);
 		}
 	}
+
+	TRACE_BOP_CELLS (_bop);
 }
 
 /**
@@ -607,6 +605,8 @@ object_space_replace (struct box_op* _bop, int _pk_modified, struct tnt_object* 
 				phi_insert (_bop, index, index_obj, _obj);
 		}
 	}
+
+	TRACE_BOP_CELLS (_bop);
 }
 
 void
@@ -623,7 +623,6 @@ prepare_replace (struct box_op* _bop, size_t _cardinality, const void* _data, u3
 	// не совпадает с размером объекта, посчитанным по его полям, то
 	// это ошибка
 	//
-	say_debug ("_len = %d, fields_bsize = %zd", _len, fields_bsize (_cardinality, _data, _len));
 	if ((_len == 0) || (fields_bsize (_cardinality, _data, _len) != _len))
 		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "tuple encoding error");
 
@@ -669,8 +668,6 @@ prepare_replace (struct box_op* _bop, size_t _cardinality, const void* _data, u3
 	//
 	if ((_bop->flags & BOX_REPLACE) && (_bop->old_obj == NULL))
 		iproto_raise (ERR_CODE_NODE_NOT_FOUND, "tuple not found");
-
-	say_debug ("%s: old_obj:%p obj:%p", __func__, _bop->old_obj, _bop->obj);
 
 	//
 	// Если предыдущая версия объекта отсутствует, то добавляем объект
@@ -1060,8 +1057,6 @@ do_field_splice (struct tbuf* _buf, const void* _args, u32 _size)
 	//
 	if (data_size > (UINT32_MAX - (tbuf_len (_buf) - nlength)))
 		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "do_field_splice: list_size is too long");
-
-	say_debug ("do_field_splice: noffset = %i, nlength = %i, data_size = %u", noffset, nlength, data_size);
 
 	//
 	// Инициализируем новый буфер (FIXME: а есть необходимость после tbuf_alloc?)
@@ -1992,8 +1987,6 @@ box_prepare (struct box_txn* _txn, int _op, const void* _data, u32 _len)
 				//
 				// Выполняем операцию вставки записи
 				//
-				say_debug ("insert: bop->flags = %d, cardinality = %d, tuple_blen = %d, data = %s",
-						   bop->flags, cardinality, tuple_blen, dump (tuple_bytes, tuple_blen));
 				prepare_replace (bop, cardinality, tuple_bytes, tuple_blen);
 
 				//
@@ -2194,17 +2187,13 @@ box_op_commit (struct box_op* _bop)
 	if (_bop->old_obj)
 		bytes_usage (_bop->object_space, _bop->old_obj, -1);
 
+	TRACE_BOP_CELLS (_bop);
 	//
 	// Проходим по всему списку изменений, которые привязаны к
 	// данной операции
 	//
 	struct box_phi_cell* cell;
 	struct box_phi_cell* tmp;
-	TAILQ_FOREACH_SAFE (cell, &_bop->cells, bop_link, tmp)
-	{
-		say_debug3 ("%s: cell:%p index:%d index_obj:%p TAILQ_FIRST(&index_obj->tailq):%p obj:%p",
-					__func__, cell, cell->phi->index->conf.n, cell->phi, TAILQ_FIRST (&cell->phi->cells), cell->obj);
-	}
 	TAILQ_FOREACH_SAFE (cell, &_bop->cells, bop_link, tmp)
 	{
 		//
