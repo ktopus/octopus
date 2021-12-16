@@ -412,7 +412,7 @@ tuple_visible_right (struct tnt_object* _obj)
 bool
 tuple_match (struct index_conf *_ic, struct tnt_object *_obj)
 {
-	say_debug ("relaxed = %d", _ic->relaxed);
+	say_debug ("%s: index:%d relaxed:%d _obj:%p", __func__, _ic->n, _ic->relaxed, _obj);
 	if (_ic->relaxed > 0)
 	{
 		for (int f = 0; f < _ic->cardinality; ++f)
