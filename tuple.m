@@ -391,7 +391,7 @@ struct tnt_object*
 phi_right (struct tnt_object* _obj)
 {
 	if (_obj && (_obj->type == BOX_PHI))
-		_obj = TAILQ_LAST (&box_phi (_obj)->cells, phi_tailq)->obj;
+		_obj = TAILQ_LAST (&box_phi (_obj)->cells, phi_cells)->obj;
 
 	assert ((_obj == NULL) || (_obj->type != BOX_PHI));
 	return _obj;
