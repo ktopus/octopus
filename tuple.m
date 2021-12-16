@@ -210,10 +210,7 @@ fields_bsize (u32 _cardinality, const void* _data, u32 _len)
 	// Читаем все поля объекта
 	//
 	for (int i = 0; i < _cardinality; ++i)
-	{
-		void* p = read_field (&tmp);
-		say_debug ("read_filed %d with size = %zd and data = %s", i, tmp.ptr - p, dump (p, tmp.ptr - p));
-	}
+		read_field (&tmp);
 
 	//
 	// Возвращаем реальный размер объекта, посчитанный по его полям
@@ -432,7 +429,8 @@ tuple_match (struct index_conf *_ic, struct tnt_object *_obj)
 		}
 	}
 
-	say_debug3 ("%s: index:%d relaxed:%d _obj:%p, result:%d", __func__, _ic->n, _ic->relaxed, _obj, result);
+	say_debug3 ("%s: index:%d relaxed:%d _obj:%p, dump:%s, result:%d",
+				__func__, _ic->n, _ic->relaxed, _obj, dump (tuple_data (_obj), tuple_bsize (_obj)), result);
 	return result;
 }
 
