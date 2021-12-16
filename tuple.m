@@ -410,7 +410,7 @@ tuple_match (struct index_conf *_ic, struct tnt_object *_obj)
 	assert (_obj->type != BOX_PHI);
 
 	bool result = true;
-	if (_ic->notnull > 0)
+	if (_ic->notnull)
 	{
 		for (int f = 0; f < _ic->cardinality; ++f)
 		{
