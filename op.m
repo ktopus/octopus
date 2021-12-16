@@ -155,8 +155,8 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 static void
 phi_commit (struct box_phi_cell* _cell)
 {
-	say_debug3 ("%s: index:%d phi:%p cell:%p TAILQ_FIRST(&phi->cells):%p obj:%p",
-				__func__, _cell->phi->index->conf.n, _cell->phi, _cell, TAILQ_FIRST (&_cell->phi->cells), _cell->obj);
+	say_debug3 ("%s: index:%d phi:%p cell:%p obj:%p",
+				__func__, _cell->phi->index->conf.n, _cell->phi, _cell, _cell->obj);
 
 	//
 	// Список версий объекта, в котором находится данная версия
