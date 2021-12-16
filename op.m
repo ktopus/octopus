@@ -125,7 +125,7 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 								__func__, cell0, cell0->head->index->conf.n, cell0->head, TAILQ_FIRST (&cell0->head->tailq), cell0->obj);
 				}
 			}
-			[_index replace:&index_obj->header];
+			[_index replace:&(index_obj->header)];
 			{
 				struct box_phi_cell* cell0;
 				TAILQ_FOREACH (cell0, &_bop->phi, bop_link)
@@ -599,30 +599,12 @@ object_space_replace (struct box_op* _bop, int _pk_modified, struct tnt_object* 
 			if (phi_right (index_old_obj))
 				phi_insert (_bop, index, index_old_obj, NULL);
 
-			{
-				struct box_phi_cell* cell0;
-				TAILQ_FOREACH (cell0, &_bop->phi, bop_link)
-				{
-					say_debug3 ("%s: cell:%p index:%d index_obj:%p TAILQ_FIRST(&index_obj->tailq):%p obj:%p",
-								__func__, cell0, cell0->head->index->conf.n, cell0->head, TAILQ_FIRST (&cell0->head->tailq), cell0->obj);
-				}
-			}
-
 			//
 			// Если новая версия объекта попадает под условие включения его в
 			// индекс, то добавляем её туда
 			//
 			if (tuple_match (&index->conf, _obj))
 				phi_insert (_bop, index, index_obj, _obj);
-
-			{
-				struct box_phi_cell* cell0;
-				TAILQ_FOREACH (cell0, &_bop->phi, bop_link)
-				{
-					say_debug3 ("%s: cell:%p index:%d index_obj:%p TAILQ_FIRST(&index_obj->tailq):%p obj:%p",
-								__func__, cell0, cell0->head->index->conf.n, cell0->head, TAILQ_FIRST (&cell0->head->tailq), cell0->obj);
-				}
-			}
 		}
 	}
 }
