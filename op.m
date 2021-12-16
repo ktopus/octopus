@@ -85,17 +85,17 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 		//
 		// Список версий объекта
 		//
-		struct box_phi* index_obj = box_phi (_index_obj);
+		struct box_phi* index_phi = box_phi (_index_obj);
 
 		//
 		// Проверяем согласованность индекса и находящегося в нём объекта
 		//
-		assert (index_obj->index == _index);
+		assert (index_phi->index == _index);
 
 		//
 		// Добавляем в индекс запись о новой версии объекта
 		//
-		cell = phi_cell_alloc (index_obj, _obj, _bop);
+		cell = phi_cell_alloc (index_phi, _obj, _bop);
 	}
 	else
 	{
@@ -105,12 +105,12 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 		// Это первая операция над индексом в транзакции, поэтому в индексе
 		// пока находится обычный объект
 		//
-		struct box_phi* index_obj = phi_alloc (_index, _index_obj, _bop);
+		struct box_phi* index_phi = phi_alloc (_index, _index_obj, _bop);
 
 		//
 		// Добавляем в него запись о новой версии объекта
 		//
-		cell = phi_cell_alloc (index_obj, _obj, _bop);
+		cell = phi_cell_alloc (index_phi, _obj, _bop);
 
 		//
 		// Замещаем объект в индексе списком его версий
@@ -125,7 +125,7 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 								__func__, cell0, cell0->head->index->conf.n, cell0->head, TAILQ_FIRST (&cell0->head->tailq), cell0->obj);
 				}
 			}
-			[_index replace:&(index_obj->header)];
+			[_index replace:&index_obj->header];
 			{
 				struct box_phi_cell* cell0;
 				TAILQ_FOREACH (cell0, &_bop->phi, bop_link)
