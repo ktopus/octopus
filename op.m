@@ -54,7 +54,7 @@
 #import <mod/box/op.h>
 
 /**
- * @brief Вывести в лог список модификаций, связанных с данной операцией
+ * @brief Вывести в лог список модификаций, связанных с заданной операцией
  */
 #define TRACE_BOP_CELLS(_bop) \
 	{ \
@@ -103,7 +103,8 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 		struct box_phi* phi = box_phi (_index_obj);
 
 		//
-		// Проверяем согласованность индекса и находящегося в нём объекта
+		// Проверяем согласованность индекса и находящегося в нём списка версий
+		// объекта
 		//
 		assert (phi->index == _index);
 

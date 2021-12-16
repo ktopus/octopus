@@ -55,12 +55,7 @@ prepare_create_object_space (struct box_meta_txn* _tx, int _n, struct tbuf* _dat
 	//
 	// Читаем конфигурацию первичного индекса
 	//
-	// FIXME: для тестовой реализации частичных индексов достаточно возможности
-	//        их задать в конфиграции, а здесь что-то будем менять только когда
-	//        окончательно определимся с типом поля relaxed (надо будет менять и
-	//        методы index_conf_read и index_conf_vallidate)
-	//
-	struct index_conf ic = {.relaxed = 0, .n = 0};
+	struct index_conf ic = {.n = 0};
 	index_conf_read (_data, &ic);
 	index_conf_validate (&ic);
 
@@ -132,7 +127,7 @@ prepare_create_index (struct box_meta_txn* _tx, struct tbuf* _data)
 	//        в конфигурации. Для отладки идеи частичных индексов этого
 	//        достаточно
 	//
-	struct index_conf ic = {.relaxed = 0, .n = read_i8(_data)};
+	struct index_conf ic = {.n = read_i8(_data)};
 	index_conf_read (_data, &ic);
 	index_conf_validate (&ic);
 
@@ -165,7 +160,7 @@ prepare_create_index (struct box_meta_txn* _tx, struct tbuf* _data)
 		return;
 
 	//
-	// Если для индекса задана операция задания предварительно
+	// Если для индекса поддерживается операция задания предварительно
 	// отсортированных объектов
 	//
 	struct tnt_object* obj = NULL;

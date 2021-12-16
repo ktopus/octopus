@@ -1187,22 +1187,24 @@ verify_indexes (struct object_space* _osp)
 	struct tnt_object* obj = NULL;
 
 	//
-	// Первичный индекс
+	// Проходим по всем объектам первичного индекса
 	//
 	Index<BasicIndex>* pk = _osp->index[0];
 	[pk iterator_init];
 	while ((obj = [pk iterator_next]))
 	{
+		//
+		// Для каждого объекта проходим по всем вторичным индексам
+		//
 		foreach_indexi (1, index, _osp)
 		{
 			//
-			// Проверяем должен ли объект находится в индексе (учитываем, что индексы
-			// могут быть частичными)
+			// Проверяем должен ли объект находится в индексе
 			//
 			bool m = tuple_match (&index->conf, obj);
 
 			//
-			// Проверяем наличие объекта в индексе
+			// Находим объект в индексе
 			//
 			struct tnt_object* index_obj = [index find_obj:obj];
 
@@ -1221,6 +1223,9 @@ verify_indexes (struct object_space* _osp)
 				say_error ("index %i of object space %i violation found at position %zi (object found in index)", index->conf.n, _osp->n, pk_rows);
 		}
 
+		//
+		// Временно засыпаем через заданное количество проверенных объектов
+		//
 		if ((cfg.snap_dump_check_rows > 0) && ((++pk_rows % cfg.snap_dump_check_rows) == 0))
 		{
 			struct timespec duration;
@@ -1610,20 +1615,20 @@ snapshot_write_rows:(XLog*)_log
 			}
 
 			//
-			// Проходим по всем записям таблицы
+			// Проходим по всем объектам таблицы
 			//
 			[pk iterator_init];
 			while ((obj = [pk iterator_next]))
 			{
 				//
-				// Запись для вывода в журнал
+				// объект для вывода в журнал
 				//
 				obj = tuple_visible_left (obj);
 				if (obj == NULL)
 					continue;
 
 				//
-				// Проверяем валидность записи
+				// Проверяем валидность объекта
 				//
 				if (!tuple_valid (obj))
 				{
@@ -1651,7 +1656,7 @@ snapshot_write_rows:(XLog*)_log
 				header.data_size    = tuple_bsize (obj);
 
 				//
-				// Пишем запись в буфер, который затем выводим в лог
+				// Пишем объект в буфер, который затем выводим в лог
 				//
 				tbuf_reset  (buf);
 				tbuf_append (buf, &header, sizeof (header));
@@ -1678,18 +1683,12 @@ snapshot_write_rows:(XLog*)_log
 			//
 			if (!shard->dummy)
 			{
-				foreach_index (index, osp)
+				//
+				// Здесь первичный индекс не пишем, так как он был сохранён ранее
+				// как часть конфигурации таблицы
+				//
+				foreach_indexi (1, index, osp)
 				{
-					//
-					// Пропускаем первичный индекс таблицы так как он уже
-					// был сохранён ранее как часть описания таблицы
-					//
-					if (index->conf.n == 0)
-						continue;
-
-					//
-					// Пишем в буфер конфигурацию индекса
-					//
 					tbuf_reset (buf);
 					write_i32  (buf, n);
 					write_i32  (buf, 0); // flags

@@ -407,6 +407,8 @@ tuple_visible_right (struct tnt_object* _obj)
 bool
 tuple_match (struct index_conf *_ic, struct tnt_object *_obj)
 {
+	assert (_obj->type != BOX_PHI);
+
 	bool result = true;
 	if (_ic->relaxed > 0)
 	{
@@ -428,7 +430,7 @@ tuple_match (struct index_conf *_ic, struct tnt_object *_obj)
 		}
 	}
 
-	say_debug3 ("%s: index:%d relaxed:%d _obj:%p, dump:%s, result:%d",
+	say_debug3 ("%s: index:%d relaxed:%d _obj:%p, dump(_obj):%s, result:%d",
 				__func__, _ic->n, _ic->relaxed, _obj, dump (tuple_data (_obj), tuple_bsize (_obj)), result);
 	return result;
 }
