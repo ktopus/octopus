@@ -238,8 +238,8 @@ phi_commit (struct box_phi_cell* _cell)
 static void
 phi_rollback (struct box_phi_cell* _cell)
 {
-	say_debug3 ("%s: index:%d phi:%p cell:%p TAILQ_LAST(&phi->cells):%p obj:%p",
-				__func__, _cell->phi->index->conf.n, _cell->phi, _cell, TAILQ_LAST (&_cell->phi->cells, phi_cells), _cell->obj);
+	say_debug3 ("%s: index:%d phi:%p cell:%p obj:%p",
+				__func__, _cell->phi->index->conf.n, _cell->phi, _cell, _cell->obj);
 
 	//
 	// Список версий объекта в индексе, в котором находится данная версий
