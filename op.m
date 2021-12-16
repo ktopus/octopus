@@ -138,7 +138,7 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 		@catch (id e)
 		{
 			phi_cell_free (cell);
-			phi_free (index_obj);
+			phi_free (index_phi);
 			@throw;
 		}
 	}
