@@ -119,10 +119,10 @@ struct box_tuple
 #define box_tuple(_obj) ((struct box_tuple*)((_obj) + 1))
 
 /**
- * @brief Объявляем список (phi_tailq), который предназначен для
- *        хранения box_phi_cell
+ * @brief Объявляем список (phi_cells), который предназначен для
+ *        связывания box_phi_cell
  */
-TAILQ_HEAD(phi_tailq, box_phi_cell);
+TAILQ_HEAD(phi_cells, box_phi_cell);
 
 /**
  * @brief Список версий объекта, который замещает соответвующий объект
@@ -154,7 +154,7 @@ struct box_phi
 	 * владеет индекс, в который он добавлен, так как он симулирует обычный
 	 * объект как структурой, так и поведением
 	 */
-	struct phi_tailq tailq;
+	struct phi_cells cells;
 
 	/**
 	 * @brief Указатель на первую операцию, которая изменила данный индекс
@@ -188,7 +188,7 @@ struct box_phi_cell
 	/**
 	 * @brief Указатель на список версий объекта в индексе
 	 */
-	struct box_phi* head;
+	struct box_phi* phi;
 
 	/**
 	 * @brief Операция, которая привела к появлению данной версии объекта
@@ -199,9 +199,9 @@ struct box_phi_cell
 
 	/**
 	 * @brief Поле для связывания в список всех версий одного объекта в рамках
-	 *        данного индекса
+	 *        индекса
 	 */
-	TAILQ_ENTRY(box_phi_cell) link;
+	TAILQ_ENTRY(box_phi_cell) phi_link;
 
 	/**
 	 * @brief Поле для связывания в список всех версий объекта для всех

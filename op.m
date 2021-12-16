@@ -85,17 +85,17 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 		//
 		// Список версий объекта
 		//
-		struct box_phi* index_phi = box_phi (_index_obj);
+		struct box_phi* phi = box_phi (_index_obj);
 
 		//
 		// Проверяем согласованность индекса и находящегося в нём объекта
 		//
-		assert (index_phi->index == _index);
+		assert (phi->index == _index);
 
 		//
 		// Добавляем в индекс запись о новой версии объекта
 		//
-		cell = phi_cell_alloc (index_phi, _obj, _bop);
+		cell = phi_cell_alloc (phi, _obj, _bop);
 	}
 	else
 	{
@@ -105,12 +105,12 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 		// Это первая операция над индексом в транзакции, поэтому в индексе
 		// пока находится обычный объект
 		//
-		struct box_phi* index_phi = phi_alloc (_index, _index_obj, _bop);
+		struct box_phi* phi = phi_alloc (_index, _index_obj, _bop);
 
 		//
 		// Добавляем в него запись о новой версии объекта
 		//
-		cell = phi_cell_alloc (index_phi, _obj, _bop);
+		cell = phi_cell_alloc (phi, _obj, _bop);
 
 		//
 		// Замещаем объект в индексе списком его версий
@@ -121,8 +121,8 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 				struct box_phi_cell* cell0;
 				TAILQ_FOREACH (cell0, &_bop->phi, bop_link)
 				{
-					say_debug3 ("%s: cell:%p index:%d index_obj:%p TAILQ_FIRST(&index_obj->tailq):%p obj:%p",
-								__func__, cell0, cell0->head->index->conf.n, cell0->head, TAILQ_FIRST (&cell0->head->tailq), cell0->obj);
+					say_debug3 ("%s: index:%d cell:%p index_obj:%p TAILQ_FIRST(&phi->cells):%p obj:%p",
+								__func__, cell0->phi->index->conf.n, cell0, cell0->phi, TAILQ_FIRST (&cell0->phi->cells), cell0->obj);
 				}
 			}
 			[_index replace:&index_phi->header];
@@ -130,8 +130,8 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 				struct box_phi_cell* cell0;
 				TAILQ_FOREACH (cell0, &_bop->phi, bop_link)
 				{
-					say_debug3 ("%s: cell:%p index:%d index_obj:%p TAILQ_FIRST(&index_obj->tailq):%p obj:%p",
-								__func__, cell0, cell0->head->index->conf.n, cell0->head, TAILQ_FIRST (&cell0->head->tailq), cell0->obj);
+					say_debug3 ("%s: index:%d cell:%p index_obj:%p TAILQ_FIRST(&phi->cells):%p obj:%p",
+								__func__, cell0->phi->index->conf.n, cell0, cell0->phi, TAILQ_FIRST (&cell0->phi->cells), cell0->obj);
 				}
 			}
 		}
@@ -144,10 +144,10 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 	}
 
 	//
-	// Добавляем информацию о новой версии объекта в список версий объекта для
+	// Добавляем информацию о новой версии объекта в список версий объекта
 	// для индексов, изменённых данной операцией
 	//
-	TAILQ_INSERT_TAIL (&_bop->phi, cell, bop_link);
+	TAILQ_INSERT_TAIL (&_bop->cells, cell, bop_link);
 }
 
 /**
@@ -157,43 +157,43 @@ static void
 phi_commit (struct box_phi_cell* _cell)
 {
 	say_debug3 ("%s: cell:%p index:%d index_obj:%p TAILQ_FIRST(&index_obj->tailq):%p obj:%p",
-				__func__, _cell, _cell->head->index->conf.n, _cell->head, TAILQ_FIRST (&_cell->head->tailq), _cell->obj);
+				__func__, _cell, _cell->phi->index->conf.n, _cell->phi, TAILQ_FIRST (&_cell->phi->cells), _cell->obj);
 
 	//
 	// Список версий объекта, в котором находится данная версия
 	//
-	struct box_phi* index_obj = _cell->head;
+	struct box_phi* phi = _cell->phi;
 
 	//
 	// Проверяем, что данная версия является самой первой в списке версий
 	//
 	// Коммитить версии из середины списка нельзя
 	//
-	assert (_cell == TAILQ_FIRST (&index_obj->tailq));
+	assert (_cell == TAILQ_FIRST (&phi->cells));
 	//
 	// Объект должен существовать либо до либо после либо и до и после операции
 	//
 	// Нельзя два раза подряд удалить один и тот же объект
 	//
-	assert ((index_obj->obj != NULL) || (_cell->obj != NULL));
+	assert ((phi->obj != NULL) || (_cell->obj != NULL));
 
 	//
-	// Если это последняя версия объекта в списке
+	// Если это последняя версия объекта в списке версий объекта в индексе
 	//
-	if (_cell == TAILQ_LAST (&index_obj->tailq, phi_tailq))
+	if (_cell == TAILQ_LAST (&phi->cells, phi_tailq))
 	{
 		//
 		// Если операция удалила объект из индекса, то удаляем весь список
 		// версий из индекса
 		//
 		if (_cell->obj == NULL)
-			[index_obj->index remove:&index_obj->header];
+			[phi->index remove:&phi->header];
 		//
 		// Если операция добавила или обновила объект, то замещаем список
 		// версий в индексе финальной версией объекта
 		//
 		else
-			[index_obj->index replace:_cell->obj];
+			[phi->index replace:_cell->obj];
 
 		//
 		// Удаляем список версий объекта в индексе из памяти, он больше не нужен
@@ -202,7 +202,7 @@ phi_commit (struct box_phi_cell* _cell)
 		// и будет удалена вместе с ней. Из списка версий объекта в индексе её тоже не
 		// удаляем, так как удаляется сам список
 		//
-		phi_free (index_obj);
+		phi_free (phi);
 	}
 	//
 	// Если это не последняя версия объекта в индексе
@@ -223,12 +223,12 @@ phi_commit (struct box_phi_cell* _cell)
 		// Саму версию объекта из памяти не удаляем, так как она принадлежит операции
 		// и будет удалена вместе с ней
 		//
-		index_obj->obj = _cell->obj;
+		phi->obj = _cell->obj;
 
 		//
 		// Удаляем версию объекта из списка версий объекта в индексе
 		//
-		TAILQ_REMOVE (&index_obj->tailq, _cell, link);
+		TAILQ_REMOVE (&phi->cells, _cell, link);
 	}
 }
 
@@ -238,25 +238,25 @@ phi_commit (struct box_phi_cell* _cell)
 static void
 phi_rollback (struct box_phi_cell* _cell)
 {
-	say_debug3 ("%s: cell:%p index:%d index_obj:%p obj:%p", __func__, _cell, _cell->head->index->conf.n, _cell->head, _cell->obj);
+	say_debug3 ("%s: cell:%p index:%d index_obj:%p obj:%p", __func__, _cell, _cell->phi->index->conf.n, _cell->phi, _cell->obj);
 
 	//
 	// Список версий объекта в индексе, в котором находится данная версий
 	//
-	struct box_phi* index_phi = _cell->head;
+	struct box_phi* phi = _cell->phi;
 
 	//
 	// Проверяем, что данная версия является самой последней в списке
 	//
 	// Отменять версии из середины списка нельзя
 	//
-	assert (_cell == TAILQ_LAST (&index_phi->tailq, phi_tailq));
+	assert (_cell == TAILQ_LAST (&phi->cells, phi_tailq));
 
 	//
 	// Если это не первая версия объекта в списке (то есть в списке
 	// присутствуют ещё версии)
 	//
-	if (_cell != TAILQ_FIRST (&index_phi->tailq))
+	if (_cell != TAILQ_FIRST (&phi->cells))
 	{
 		//
 		// В списке присутствует удаление два раза подряд одного и того же объекта.
@@ -269,7 +269,7 @@ phi_rollback (struct box_phi_cell* _cell)
 		// Саму версию из памяти не удаляем, так как она принадлежит операции и будет
 		// удалена вместе с ней
 		//
-		TAILQ_REMOVE (&index_phi->tailq, _cell, link);
+		TAILQ_REMOVE (&phi->cells, _cell, link);
 	}
 	//
 	// Если это последняя версия объекта в списке
@@ -281,21 +281,21 @@ phi_rollback (struct box_phi_cell* _cell)
 		// которого не было до начала транзакции. Такого быть не должно, это ошибка
 		// кода, поэтому ассертимся
 		//
-		assert ((index_phi->obj != NULL) || (_cell->obj != NULL));
+		assert ((phi->obj != NULL) || (_cell->obj != NULL));
 
 		//
 		// Если до начала транзакции объекта не существовало, то просто удаляем список
 		// версий объекта из индекса
 		//
-		say_debug ("index_phi = %p, index_phi->header = %p", index_phi, &index_phi->header);
-		if (index_phi->obj == NULL)
-			[index_phi->index remove:&index_phi->header];
+		say_debug ("index_phi = %p, index_phi->header = %p", phi, &phi->header);
+		if (phi->obj == NULL)
+			[phi->index remove:&phi->header];
 		//
 		// Если объект существовал до начала транзакции, то вставляем его изначальную
 		// версию в индекс вместо списка версий
 		//
 		else
-			[index_phi->index replace:index_phi->obj];
+			[phi->index replace:phi->obj];
 
 		//
 		// Удаляем список изменений из памяти, он больше не нужен
@@ -304,7 +304,7 @@ phi_rollback (struct box_phi_cell* _cell)
 		// принадлежит операции. Из списка её тоже не удаляем, так как
 		// удаляется сам список
 		//
-		phi_free (index_phi);
+		phi_free (phi);
 	}
 }
 
@@ -1909,7 +1909,7 @@ box_op_alloc (struct box_txn* _txn, int _op, const void* _data, int _len)
 	bop->txn      = _txn;
 	bop->op       = _op & 0xffff;
 	bop->data_len = _len;
-	TAILQ_INIT (&bop->phi);
+	TAILQ_INIT (&bop->cells);
 
 	memcpy (bop->data, _data, _len);
 
@@ -2200,12 +2200,12 @@ box_op_commit (struct box_op* _bop)
 	//
 	struct box_phi_cell* cell;
 	struct box_phi_cell* tmp;
-	TAILQ_FOREACH_SAFE (cell, &_bop->phi, bop_link, tmp)
+	TAILQ_FOREACH_SAFE (cell, &_bop->cells, bop_link, tmp)
 	{
 		say_debug3 ("%s: cell:%p index:%d index_obj:%p TAILQ_FIRST(&index_obj->tailq):%p obj:%p",
-					__func__, cell, cell->head->index->conf.n, cell->head, TAILQ_FIRST (&cell->head->tailq), cell->obj);
+					__func__, cell, cell->phi->index->conf.n, cell->phi, TAILQ_FIRST (&cell->phi->cells), cell->obj);
 	}
-	TAILQ_FOREACH_SAFE (cell, &_bop->phi, bop_link, tmp)
+	TAILQ_FOREACH_SAFE (cell, &_bop->cells, bop_link, tmp)
 	{
 		//
 		// Подтверждаем изменение и удаляем его из списка,
@@ -2287,7 +2287,7 @@ box_op_rollback (struct box_op* _bop)
 	//
 	struct box_phi_cell* cell;
 	struct box_phi_cell* tmp;
-	TAILQ_FOREACH_REVERSE_SAFE (cell, &_bop->phi, phi_tailq, bop_link, tmp)
+	TAILQ_FOREACH_REVERSE_SAFE (cell, &_bop->cells, phi_tailq, bop_link, tmp)
 	{
 		//
 		// Отменяем изменение и удаляем его из списка,
@@ -2426,7 +2426,7 @@ box_submit (struct box_txn* _tx)
 		else
 		{
 			struct box_phi_cell* cell;
-			TAILQ_FOREACH (cell, &bop->phi, bop_link)
+			TAILQ_FOREACH (cell, &bop->cells, bop_link)
 				assert (cell->obj == NULL);
 		}
 

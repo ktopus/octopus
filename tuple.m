@@ -306,24 +306,24 @@ phi_alloc (Index<BasicIndex>* _index, struct tnt_object* _obj, struct box_op* _b
 	//
 	// Получаем блок памяти из фиксированного slab-кэша
 	//
-	struct box_phi* head = slab_cache_alloc (&g_phi_cache);
+	struct box_phi* phi = slab_cache_alloc (&g_phi_cache);
 	//
 	// ... и инициализируем его
 	//
-	bzero (head, sizeof (struct box_phi));
+	bzero (phi, sizeof (struct box_phi));
 
 	//
 	// Заполняем поля
 	//
-	head->header.type = BOX_PHI;
-	head->index       = _index;
-	head->obj         = _obj;
-	head->bop         = _bop;
-	TAILQ_INIT (&head->tailq);
+	phi->header.type = BOX_PHI;
+	phi->index       = _index;
+	phi->obj         = _obj;
+	phi->bop         = _bop;
+	TAILQ_INIT (&phi->cells);
 
-	say_debug3 ("%s: head:%p index:%d obj:%p TAILQ_FIRST(&index_obj->tailq):%p",
-				__func__, head, _index->conf.n, _obj, TAILQ_FIRST(&head->tailq));
-	return head;
+	say_debug3 ("%s: index:%d phi:%p TAILQ_FIRST(&phi->cells):%p obj:%p",
+				__func__, _index->conf.n, phi, TAILQ_FIRST(&phi->cells), _obj);
+	return phi;
 }
 
 struct box_phi_cell*
@@ -341,17 +341,17 @@ phi_cell_alloc (struct box_phi* _phi, struct tnt_object* _obj, struct box_op* _b
 	//
 	// Заполняем поля
 	//
-	cell->head = _phi;
-	cell->obj  = _obj;
-	cell->bop  = _bop;
+	cell->phi = _phi;
+	cell->obj = _obj;
+	cell->bop = _bop;
 
 	//
 	// Добавляем запись об изменении в список изменений объекта в индексе
 	//
-	TAILQ_INSERT_TAIL (&_phi->tailq, cell, link);
+	TAILQ_INSERT_TAIL (&_phi->cells, cell, phi_link);
 
-	say_debug3 ("%s: index:%d _index_obj:%p cell:%p TAILQ_FIRST(&index_obj->tailq):%p obj:%p",
-				__func__, cell->head->index->conf.n, cell->head, cell, TAILQ_FIRST (&cell->head->tailq), cell->obj);
+	say_debug3 ("%s: index:%d phi:%p cell:%p TAILQ_FIRST(&phi->cells):%p obj:%p",
+				__func__, cell->phi->index->conf.n, cell->phi, cell, TAILQ_FIRST (&cell->phi->cells), cell->obj);
 	return cell;
 }
 
@@ -374,7 +374,7 @@ phi_obj (const struct tnt_object* _obj)
 
 	struct box_phi* phi = box_phi (_obj);
 
-	return phi->obj ? phi->obj : TAILQ_FIRST (&phi->tailq)->obj;
+	return phi->obj ? phi->obj : TAILQ_FIRST (&phi->cells)->obj;
 }
 
 struct tnt_object*
@@ -391,7 +391,7 @@ struct tnt_object*
 phi_right (struct tnt_object* _obj)
 {
 	if (_obj && (_obj->type == BOX_PHI))
-		_obj = TAILQ_LAST (&box_phi (_obj)->tailq, phi_tailq)->obj;
+		_obj = TAILQ_LAST (&box_phi (_obj)->cells, phi_tailq)->obj;
 
 	assert ((_obj == NULL) || (_obj->type != BOX_PHI));
 	return _obj;

@@ -212,7 +212,7 @@ struct box_op
 	 * box_phi, которые замещают объект в каждом изменённом индекск
 	 * и этими записями не владеет
 	 */
-	struct phi_tailq phi;
+	struct phi_cells cells;
 
 	/**
 	 * @brief Количество объектов операции
