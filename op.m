@@ -53,13 +53,18 @@
 
 #import <mod/box/op.h>
 
+/**
+ * @brief Вывести в лог список модификаций, связанных с данной операцией
+ */
 #define TRACE_BOP_CELLS(_bop) \
 	{ \
 		struct box_phi_cell* xxx_cell; \
 		TAILQ_FOREACH (xxx_cell, &(_bop)->cells, bop_link) \
 		{ \
-			say_debug3 ("%s[trace bop cells]: index:%d cell:%p phi:%p TAILQ_FIRST(&phi->cells):%p obj:%p", \
-						__func__, xxx_cell->phi->index->conf.n, xxx_cell, xxx_cell->phi, TAILQ_FIRST (&xxx_cell->phi->cells), xxx_cell->obj); \
+			struct tnt_object* prev_obj = TAILQ_PREV (&xxx_cell->phi->cells, phi_cells, phi_link) ? \
+					TAILQ_PREV (&xxx_cell->phi->cells, phi_cells, phi_link)->obj : xxx_cell->phi->obj; \
+			say_debug3 ("%s[bop cells]: index:%d cell:%p phi:%p prev obj:%p obj:%p", \
+						__func__, xxx_cell->phi->index->conf.n, xxx_cell, xxx_cell->phi, prev_obj, xxx_cell->obj); \
 		} \
 	}
 
