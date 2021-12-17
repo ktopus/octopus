@@ -797,7 +797,7 @@ build_secondary (struct object_space* _osp)
 	//
 	// Индексы типа хэш
 	//
-	Index<HashIndex>* hashes[MAX_IDX] = {nil,};
+	Hash* hashes[MAX_IDX] = {nil,};
 	int hash_count = 0;
 
 	//
@@ -810,9 +810,9 @@ build_secondary (struct object_space* _osp)
 		if (_osp->index[i])
 		{
 			if ([_osp->index[i] isKindOf:[Tree class]])
-				trees[tree_count++] = (id)_osp->index[i];
+				trees[tree_count++] = (Tree*)_osp->index[i];
 			else if ([_osp->index[i] isKindOf:[Hash class]])
-				hashes[hash_count++] = (id)_osp->index[i];
+				hashes[hash_count++] = (Hash*)_osp->index[i];
 			else
 				panic ("object_space = %" PRIu32 ", index = %" PRIu32 " is not a tree or hash", _osp->n, i);
 		}
