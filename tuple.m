@@ -414,18 +414,24 @@ tuple_match (struct index_conf *_ic, struct tnt_object *_obj)
 	{
 		for (int f = 0; f < _ic->cardinality; ++f)
 		{
-			u8* fdata = tuple_field (_obj, _ic->field[f].index);
-			if (!fdata)
+			//
+			// Проверку делаем только для явно заданных в индексе полей
+			//
+			if (!_ic->field[f].merged)
 			{
-				result = false;
-				break;
-			}
+				u8* fdata = tuple_field (_obj, _ic->field[f].index);
+				if (!fdata)
+				{
+					result = false;
+					break;
+				}
 
-			u32 len = LOAD_VARINT32 (fdata);
-			if (len == 0)
-			{
-				result = false;
-				break;
+				u32 len = LOAD_VARINT32 (fdata);
+				if (len == 0)
+				{
+					result = false;
+					break;
+				}
 			}
 		}
 	}
