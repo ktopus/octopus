@@ -895,13 +895,7 @@ build_secondary (struct object_space* _osp)
 				{
 					@try
 					{
-						//
-						// Поскольку не все индексы реализуют полный набор методов протокола BasicIndex
-						// (например PHash не реализует -clear), то вызываем метод добавления объекта в
-						// индекс через селектор. То, что индекс данный метод поддерживает было проверено
-						// ранее
-						//
-						[others[i] performSelector:@selector(replace:) withObject:obj];
+						[others[i] replace:obj];
 					}
 					@catch (id e)
 					{
