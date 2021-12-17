@@ -789,6 +789,12 @@ build_secondary (struct object_space* _osp)
 	size_t ntuples = [pk size];
 
 	//
+	// Если данных в таблице нет, то и индексировать нечего
+	//
+	if (ntuples == 0)
+		return;
+
+	//
 	// Древовидные индексы
 	//
 	Tree* trees[MAX_IDX] = {nil,};
@@ -830,15 +836,15 @@ build_secondary (struct object_space* _osp)
 	if ((tree_count == 0) && (other_count == 0))
 		return;
 
-	say_info ("Building secondary indexes of object space %i", _osp->n);
-
 	//
-	// При наличии записей заполняем конфигурацию dup_conf, которая является
-	// глобальной и используется затем в функции on_duplicate_action при
-	// определении действия, выполняемого для найденных дубликатов
+	// Заполняем конфигурацию dup_conf, которая является глобальной для всех
+	// древовидных индексов таблицы и используется затем в функции on_duplicate_action
+	// при определении действия, выполняемого для найденных дубликатов
 	//
-	if ((ntuples > 0) && cfg.on_snapshot_duplicates)
+	if (cfg.on_snapshot_duplicates)
 	{
+		assert (dup_conf == NULL);
+
 		int cnt = 0;
 		for (int i = 0; cfg.on_snapshot_duplicates[i]; ++i)
 		{
@@ -877,18 +883,15 @@ build_secondary (struct object_space* _osp)
 		}
 	}
 
+	say_info ("Building secondary indexes of object space %i", _osp->n);
+	title ("building_indexes/object_space: %i", _osp->n);
+
 	//
-	// Если есть что индексировать
+	// Перестраиваем недревовидные индексы
 	//
-	if (ntuples > 0)
+	if (other_count > 0)
 	{
-		title ("building_indexes/object_space: %i", _osp->n);
-
 		struct tnt_object* obj = NULL;
-
-		//
-		// Перестраиваем недревовидные индексы
-		//
 		[pk iterator_init];
 		while ((obj = [pk iterator_next]))
 		{
@@ -911,128 +914,133 @@ build_secondary (struct object_space* _osp)
 				}
 			}
 		}
+	}
+
+	//
+	// Перестраиваем древовидные индексы с возможным удалением дубликатов
+	//
+	for (int i = 0; i < tree_count; ++i)
+	{
+		say_info ("    %i: %s", trees[i]->conf.n, [[trees[i] class] name]);
 
 		//
-		// Перестраиваем древовидные индексы с возможным удалением дубликатов
+		// Распределяем память под узлы древовидного индекса
 		//
-		for (int i = 0; i < tree_count; ++i)
+		// Резервируем память под все объекты таблицы даже для частичных индексов, так
+		// проще. Подсчёт реального количества объектов, подходящих под условие включения
+		// в частичный индекс сделаем одновременно с инициализацией соответствующих узлов
+		//
+		void* nodes = xmalloc (ntuples*trees[i]->node_size);
+
+		//
+		// Число инициализированных узлов (учитываем, что индексы могут быть частичными)
+		//
+		u32 t = 0;
+
+		//
+		// Инициализируем массив узлов индекса
+		//
+		struct tnt_object* obj = NULL;
+		[pk iterator_init];
+		while ((obj = [pk iterator_next]))
 		{
-			say_info ("    %i: %s", trees[i]->conf.n, [[trees[i] class] name]);
-
 			//
-			// Распределяем память под узлы древовидного индекса
+			// Учитываем, что индекс может быть частичным
 			//
-			// Резервируем память под все объекты таблицы даже для частичных индексов, так
-			// проще. Подсчёт реального количества объектов, подходящих под условие включения
-			// в частичный индекс сделаем одновременно с инициализацией соответствующих узлов
-			//
-			void* nodes = xmalloc (ntuples*trees[i]->node_size);
-
-			//
-			// Инициализируем массив узлов индекса
-			//
-			u32 t = 0;
-			[pk iterator_init];
-			while ((obj = [pk iterator_next]))
+			if (tuple_match (&trees[i]->conf, obj))
 			{
 				//
-				// Учитываем, что индекс может быть частичным
+				// Узел индекса для инициализации
 				//
-				if (tuple_match (&trees[i]->conf, obj))
-				{
-					//
-					// Узел индекса для инициализации
-					//
-					struct index_node* node = nodes + t*trees[i]->node_size;
+				struct index_node* node = nodes + t*trees[i]->node_size;
 
-					//
-					// Инициализация узла
-					//
-					trees[i]->dtor (obj, node, trees[i]->dtor_arg);
+				//
+				// Инициализация узла
+				//
+				trees[i]->dtor (obj, node, trees[i]->dtor_arg);
 
-					//
-					// Число инициализированных узлов
-					//
-					++t;
-				}
+				//
+				// Число инициализированных узлов
+				//
+				++t;
 			}
+		}
+
+		//
+		// Арументы операции сортировки
+		//
+		struct print_dups_arg arg = {.space = _osp->n, .index = trees[i]->conf.n, NULL};
+		//
+		// Действие при нахождении дубликатов для индексов, которые отмечены
+		// как уникальные
+		//
+		enum dup_action action = on_duplicate_action (arg.space, arg.index);
+		//
+		// Если задано удаление дубликатов, то создаём буфер для записи
+		// индексов дубликатов для удаления
+		//
+		if (action == DUP_DELETE)
+			arg.positions = tbuf_alloc (fiber->pool);
+
+		//
+		// Сортируем массив инициализированных узлов индекса по возрастанию. При этом
+		// если индекс сконфигурирован как уникальный, то для всех найденных дубликатов
+		// будет вызываться функция box_idx_print_dups и если дубликаты были найдены,
+		// то будет возвращён признак false
+		//
+		if (![trees[i] sort_nodes:nodes count:t onduplicate:box_idx_print_dups arg:(void*)&arg])
+		{
+			say_debug ("space %d index %d FOUND DUPS!!! action is %s", arg.space, arg.index,
+						((action == DUP_PANIC) ? "PANIC" : (action == DUP_IGNORE) ? "IGNORE" : "DELETE"));
+
+			if (action != DUP_IGNORE)
+				say_error ("if you want to ignore this duplicates, add " \
+							"on_snapshot_duplicates[%d].index[%d].action=\"IGNORE\"",
+								arg.space, arg.index);
+
+			if (action != DUP_DELETE)
+				say_error ("if you want to delete duplicates rows, add " \
+							"on_snapshot_duplicates[%d].index[%d].action=\"DELETE\"",
+								arg.space, arg.index);
+
+			if (action == DUP_PANIC)
+				panic ("duplicate tuples");
 
 			//
-			// Арументы операции сортировки
-			//
-			struct print_dups_arg arg = {.space = _osp->n, .index = trees[i]->conf.n, NULL};
-			//
-			// Действие при нахождении дубликатов для индексов, которые отмечены
-			// как уникальные
-			//
-			enum dup_action action = on_duplicate_action (arg.space, arg.index);
-			//
-			// Если задано удаление дубликатов, то создаём буфер для записи
-			// индексов дубликатов для удаления
+			// В случае если задано удаление дубликатов
 			//
 			if (action == DUP_DELETE)
-				arg.positions = tbuf_alloc (fiber->pool);
-
-			//
-			// Сортируем массив инициализированных узлов индекса по возрастанию. При этом
-			// если индекс сконфигурирован как уникальный, то для всех найденных дубликатов
-			// будет вызываться функция box_idx_print_dups и если дубликаты были найдены,
-			// то будет возвращён признак false
-			//
-			if (![trees[i] sort_nodes:nodes count:t onduplicate:box_idx_print_dups arg:(void*)&arg])
 			{
-				say_debug ("space %d index %d FOUND DUPS!!! action is %s", arg.space, arg.index,
-							((action == DUP_PANIC) ? "PANIC" : (action == DUP_IGNORE) ? "IGNORE" : "DELETE"));
-
-				if (action != DUP_IGNORE)
-					say_error ("if you want to ignore this duplicates, add " \
-								"on_snapshot_duplicates[%d].index[%d].action=\"IGNORE\"",
-									arg.space, arg.index);
-
-				if (action != DUP_DELETE)
-					say_error ("if you want to delete duplicates rows, add " \
-								"on_snapshot_duplicates[%d].index[%d].action=\"DELETE\"",
-									arg.space, arg.index);
-
-				if (action == DUP_PANIC)
-					panic ("duplicate tuples");
+				say_error ("DON'T FORGET TO SAVE SNAPSHOT AS SOON AS POSSIBLE!!!!!!!!");
 
 				//
-				// В случае если задано удаление дубликатов
+				// Общее число позиций узлов в массиве дубликатов (используем тот факт,
+				// что все 32x битные целые выводятся в буфер как есть)
 				//
-				if (action == DUP_DELETE)
-				{
-					//
-					// Общее число позиций узлов в массиве дубликатов (используем тот факт,
-					// что все 32x битные целые выводятся в буфер как есть)
-					//
-					uint32_t npos = tbuf_len (arg.positions)/sizeof (uint32_t);
+				uint32_t npos = tbuf_len (arg.positions)/sizeof (uint32_t);
 
-					//
-					// Пишем в конец общее количество инициализированных узлов в массиве nodes
-					//
-					write_i32 (arg.positions, t);
+				//
+				// Пишем в конец общее количество инициализированных узлов в массиве nodes
+				//
+				write_i32 (arg.positions, t);
 
-					//
-					// Удаляем дубликаты из массива инициализированных узлов индекса
-					//
-					delete_duplicates (_osp, trees[i]->node_size, arg.positions->ptr, npos, nodes);
+				//
+				// Удаляем дубликаты из массива инициализированных узлов индекса
+				//
+				delete_duplicates (_osp, trees[i]->node_size, arg.positions->ptr, npos, nodes);
 
-					//
-					// Уменьшаем общее число инициализированных узлов на количество удалённых
-					// дубликатов
-					//
-					t -= npos;
-
-					say_error ("DON'T FORGET TO SAVE SNAPSHOT AS SOON AS POSSIBLE!!!!!!!!");
-				}
+				//
+				// Уменьшаем общее число инициализированных узлов на количество удалённых
+				// дубликатов
+				//
+				t -= npos;
 			}
-
-			//
-			// После загрузки данных в индекс массив nodes будет удалён
-			//
-			[trees[i] set_sorted_nodes:nodes count:t];
 		}
+
+		//
+		// После загрузки данных в индекс массив nodes будет удалён
+		//
+		[trees[i] set_sorted_nodes:nodes count:t];
 	}
 
 	if (dup_conf != NULL)
