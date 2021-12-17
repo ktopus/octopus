@@ -797,7 +797,7 @@ build_secondary (struct object_space* _osp)
 	//
 	// Прочие индексы, которые поддерживают только метод replace
 	//
-	id others[MAX_IDX] = {nil,};
+	Index* others[MAX_IDX] = {nil,};
 	int other_count = 0;
 
 	//
@@ -895,12 +895,12 @@ build_secondary (struct object_space* _osp)
 				{
 					@try
 					{
-						[others[i] replace:obj];
+						[(id)others[i] replace:obj];
 					}
 					@catch (id e)
 					{
 						say_error ("can't insert object into osp:%i index:%i, try to replace this index with non unique TREE index",
-								   _osp->n, ((Index*)others[i])->conf.n);
+								   _osp->n, others[i]->conf.n);
 					}
 				}
 			}
