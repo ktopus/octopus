@@ -1009,28 +1009,22 @@ build_secondary (struct object_space* _osp)
 					uint32_t npos = tbuf_len (arg.positions)/sizeof (uint32_t);
 
 					//
-					// Если дубликаты были найдены
+					// Пишем в конец общее количество инициализированных узлов в массиве nodes
 					//
-					if (npos > 0)
-					{
-						//
-						// Пишем в конец общее количество инициализированных узлов в массиве nodes
-						//
-						write_i32 (arg.positions, t);
+					write_i32 (arg.positions, t);
 
-						//
-						// Удаляем дубликаты из массива инициализированных узлов индекса
-						//
-						delete_duplicates (_osp, trees[i]->node_size, arg.positions->ptr, npos, nodes);
+					//
+					// Удаляем дубликаты из массива инициализированных узлов индекса
+					//
+					delete_duplicates (_osp, trees[i]->node_size, arg.positions->ptr, npos, nodes);
 
-						//
-						// Уменьшаем общее число инициализированных узлов на количество удалённых
-						// дубликатов
-						//
-						t -= npos;
+					//
+					// Уменьшаем общее число инициализированных узлов на количество удалённых
+					// дубликатов
+					//
+					t -= npos;
 
-						say_error ("DON'T FORGET TO SAVE SNAPSHOT AS SOON AS POSSIBLE!!!!!!!!");
-					}
+					say_error ("DON'T FORGET TO SAVE SNAPSHOT AS SOON AS POSSIBLE!!!!!!!!");
 				}
 			}
 
