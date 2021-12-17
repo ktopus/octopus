@@ -783,27 +783,35 @@ static void
 build_secondary (struct object_space* _osp)
 {
 	//
-	// Первичный индекс и количество записей
+	// Первичный индекс и общее количество объектов в таблице
 	//
 	Index<BasicIndex>* pk = _osp->index[0];
 	size_t ntuples = [pk size];
 
 	//
-	// Индексы типа двоичное дерево
+	// Древовидные индексы
 	//
 	Tree* trees[MAX_IDX] = {nil,};
 	int tree_count = 0;
 
 	//
-	// Прочие индексы, которые поддерживают только метод replace
+	// Прочие индексы, для которых нам нужна только поддержка метода
+	// replace:
 	//
-	Index* others[MAX_IDX] = {nil,};
+	// Поскольку в конфигурации таблицы жёстко прошито, что все индексы
+	// должны поддерживать интерфейс Index с протоколом BasicIndex, то
+	// каких-то дополнительных проверок здесь не делаем
+	//
+	// FIXME: PHash не поддерживает протокол BasicIndex в полном объёме,
+	//        я не знаю, проблема это или нет
+	//
+	Index<BasicIndex>* others[MAX_IDX] = {nil,};
 	int other_count = 0;
 
 	//
-	// Разделяем все вторичные индексы на бинарные и остальные, поскольку
-	// при построении индексов придётся использовать разные возможности
-	// интерфейсов
+	// Разделяем все вторичные индексы на древовидные и остальные, поскольку
+	// для древовидных индексов можно использовать более широкий функционал
+	// (исключение дубликатов с предварительной сортировкой узлов)
 	//
 	for (int i = 1; i < MAX_IDX; ++i)
 	{
@@ -811,10 +819,8 @@ build_secondary (struct object_space* _osp)
 		{
 			if ([_osp->index[i] isKindOf:[Tree class]])
 				trees[tree_count++] = (Tree*)_osp->index[i];
-			else if ([_osp->index[i] respondsTo:@selector(replace:)])
-				others[other_count++] = _osp->index[i];
 			else
-				panic ("object_space = %" PRIu32 ", index = %" PRIu32 " is not a tree and doesn't support replace method", _osp->n, i);
+				others[other_count++] = _osp->index[i];
 		}
 	}
 
@@ -881,7 +887,7 @@ build_secondary (struct object_space* _osp)
 		struct tnt_object* obj = NULL;
 
 		//
-		// Перестраиваем небинарные индексы, поддерживающие метод replace:
+		// Перестраиваем недревовидные индексы
 		//
 		[pk iterator_init];
 		while ((obj = [pk iterator_next]))
@@ -895,7 +901,7 @@ build_secondary (struct object_space* _osp)
 				{
 					@try
 					{
-						[(id)others[i] replace:obj];
+						[others[i] replace:obj];
 					}
 					@catch (id e)
 					{
@@ -907,14 +913,14 @@ build_secondary (struct object_space* _osp)
 		}
 
 		//
-		// Перестраиваем бинарные индексы с возможным удалением дубликатов
+		// Перестраиваем древовидные индексы с возможным удалением дубликатов
 		//
 		for (int i = 0; i < tree_count; ++i)
 		{
 			say_info ("    %i: %s", trees[i]->conf.n, [[trees[i] class] name]);
 
 			//
-			// Распределяем память под узлы двоичного индекса
+			// Распределяем память под узлы древовидного индекса
 			//
 			// Резервируем память под все объекты таблицы даже для частичных индексов, так
 			// проще. Подсчёт реального количества объектов, подходящих под условие включения
@@ -1003,22 +1009,28 @@ build_secondary (struct object_space* _osp)
 					uint32_t npos = tbuf_len (arg.positions)/sizeof (uint32_t);
 
 					//
-					// Пишем в конец общее количество инициализированных узлов в массиве nodes
+					// Если дубликаты были найдены
 					//
-					write_i32 (arg.positions, t);
+					if (npos > 0)
+					{
+						//
+						// Пишем в конец общее количество инициализированных узлов в массиве nodes
+						//
+						write_i32 (arg.positions, t);
 
-					//
-					// Удаляем дубликаты из массива инициализированных узлов индекса
-					//
-					delete_duplicates (_osp, trees[i]->node_size, arg.positions->ptr, npos, nodes);
+						//
+						// Удаляем дубликаты из массива инициализированных узлов индекса
+						//
+						delete_duplicates (_osp, trees[i]->node_size, arg.positions->ptr, npos, nodes);
 
-					//
-					// Уменьшаем общее число инициализированных узлов на количество удалённых
-					// дубликатов
-					//
-					t -= npos;
+						//
+						// Уменьшаем общее число инициализированных узлов на количество удалённых
+						// дубликатов
+						//
+						t -= npos;
 
-					say_error ("DON'T FORGET TO SAVE SNAPSHOT AS SOON AS POSSIBLE!!!!!!!!");
+						say_error ("DON'T FORGET TO SAVE SNAPSHOT AS SOON AS POSSIBLE!!!!!!!!");
+					}
 				}
 			}
 
