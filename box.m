@@ -895,7 +895,7 @@ build_secondary (struct object_space* _osp)
 				{
 					@try
 					{
-						[others[i] replace:obj];
+						[((id)others[i]) replace:obj];
 					}
 					@catch (id e)
 					{
