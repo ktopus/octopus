@@ -802,8 +802,18 @@ build_secondary (struct object_space* _osp)
 
 	//
 	// Разделяем все вторичные индексы на бинарные и хэши, поскольку
-	// при построении индексов можно использовать разные дополнительные
-	// возможностей интерфейсов
+	// при построении индексов придётся использовать разные возможности
+	// интерфейсов
+	//
+	// Здесь на самом деле не всё корректно, так как проверяя то, что
+	// индекс является хэшем не проверяется поддержка этим хэшем протокола
+	// HashIndex. Однако на практике если индекс является субклассом Hash,
+	// то он обязательно поддерживает протокол HashIndex.
+	//
+	// Немного отдельно стоит PHash, в его интерфейсе нет прямого указания,
+	// что он реализует Hash<HashIndex>, однако в реализации при создании
+	// PHash возвращается на самом деле PHashImpl, который реализует и
+	// Hash и HashIndex. Зачем так сделано, я не очень понял.
 	//
 	for (int i = 1; i < MAX_IDX; ++i)
 	{
@@ -811,7 +821,7 @@ build_secondary (struct object_space* _osp)
 		{
 			if ([_osp->index[i] isKindOf:[Tree class]])
 				trees[tree_count++] = (Tree*)_osp->index[i];
-			else if ([_osp->index[i] isKindOf:[Hash class]] && [_osp->index[i] conformsToProtocol:@protocol(HashIndex)])
+			else if ([_osp->index[i] isKindOf:[Hash class]])
 				hashes[hash_count++] = (Hash<HashIndex>*)_osp->index[i];
 			else
 				panic ("object_space = %" PRIu32 ", index = %" PRIu32 " is not a tree or hash", _osp->n, i);
@@ -907,7 +917,7 @@ build_secondary (struct object_space* _osp)
 		}
 
 		//
-		// Перестраиваем двоичные индексы с возможным удалением дубликатов
+		// Перестраиваем бинарные индексы с возможным удалением дубликатов
 		//
 		for (int i = 0; i < tree_count; ++i)
 		{
