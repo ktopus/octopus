@@ -40,7 +40,7 @@ struct hash {
 	struct ptr_hash_desc d;
 };
 
-@interface PHashImp: Hash<HashIndex> {
+@interface PHashImp: Hash {
 @public
 	struct ptr_hash h;
 }
