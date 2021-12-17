@@ -712,27 +712,73 @@ index_conf_validate(struct index_conf *d)
 }
 
 void
-index_conf_merge_unique(struct index_conf *to, struct index_conf *from)
+index_conf_merge_unique (struct index_conf* to, struct index_conf* from)
 {
-	assert(!to->unique && from->unique);
-	int i, j, old_cardinality = to->cardinality;
-	for (i = 0; i < from->cardinality; i++) {
-		for (j = 0; j < to->cardinality; j++) {
+	//
+	// Дополнять полями уникального индекса можно только поля
+	// неуникального индекса
+	//
+	assert (!to->unique && from->unique);
+
+	//
+	// Запоминаем исходное число полей в индексе, который будем
+	// дополнять до уникального
+	//
+	int to_cardinality = to->cardinality;
+
+	//
+	// По всем полям уникального индекса
+	//
+	for (int i = 0; i < from->cardinality; ++i)
+	{
+		//
+		// Ищем соответствующее поле в неуникальном индексе
+		//
+		int j;
+		for (j = 0; j < to->cardinality; ++j)
+		{
 			if (to->field[j].index == from->field[i].index)
 				break;
 		}
+
+		//
+		// Если такое поле было явно задано в индексе, то ничего
+		// дополнять не надо
+		//
 		if (j < to->cardinality)
 			continue;
-		if (to->cardinality == nelem(to->field))
-			index_raise("index_conf.cardinality is too big during merge");
+
+		//
+		// Если вышли за пределы максимального числа индексируемых
+		// полей
+		//
+		if (to->cardinality == nelem (to->field))
+			index_raise ("index_conf.cardinality is too big during merge");
+
+		//
+		// Дополняем неуникальный индекс полем из уникального индекса
+		// и отмечаем его как заданное неявно. Все поля из уникального
+		// индекса добавляются после полей, явно заданных в неуникальном
+		// индексе, чтобы не нарушать порядок сканирования индекса при
+		// неполном задании списка полей
+		//
 		to->fill_order[j] = j;
 		to->field[j] = from->field[i];
-		to->cardinality++;
+		to->field[j].merged = true;
+		++to->cardinality;
 	}
 
-	if (old_cardinality != to->cardinality) {
-		index_conf_sort_fields(to);
-	}
+	//
+	// Если неуникальный индекс был дополнен, то заново пересортируем
+	// его поля
+	//
+	if (to_cardinality != to->cardinality)
+		index_conf_sort_fields (to);
+
+	//
+	// Объединённый индекс является уникальным, так как уникален один
+	// из исходных объединяемых индексов
+	//
 	to->unique = true;
 }
 
