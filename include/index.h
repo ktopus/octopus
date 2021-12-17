@@ -73,7 +73,7 @@ struct index_field_desc {
 		     union index_field *key = &node->key + index_conf->field[i].offset */,
 	   index /* of tuple field */;
 	char sort_order, type;
-	bool merged; // Признак поля, неявно добавленноного к индексу
+	bool merged; // Признак поля, неявно добавленного к индексу
 };
 
 enum index_type {
