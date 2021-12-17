@@ -573,7 +573,7 @@ configure_index (int _i, int _j, Index* _pk)
 	// ... и не может быть частичным
 	//
 	if ((_j == 0) && ic->notnull)
-		panic ("(object_space = %" PRIu32 ") object_space PK index can't be notnull", _i);
+		panic ("(object_space = %" PRIu32 ") object_space PK index must include all objects and can't be notnull", _i);
 
 	//
 	// Для остальных неуникальных индексов добавляем в них поля
@@ -801,17 +801,21 @@ build_secondary (struct object_space* _osp)
 	int hash_count = 0;
 
 	//
-	// Разделяем все вторичные индексы на бинарные и хэши
+	// Разделяем все вторичные индексы на бинарные и хэши, поскольку
+	// при построении индексов можно использовать разные дополнительные
+	// возможностей интерфейсов
 	//
 	for (int i = 1; i < MAX_IDX; ++i)
 	{
-		if (_osp->index[i] == nil)
-			continue;
-
-		if ([_osp->index[i] isKindOf:[Tree class]])
-			trees[tree_count++] = (id)_osp->index[i];
-		else
-			hashes[hash_count++] = (id)_osp->index[i];
+		if (_osp->index[i])
+		{
+			if ([_osp->index[i] isKindOf:[Tree class]])
+				trees[tree_count++] = (id)_osp->index[i];
+			else if ([_osp->index[i] isKindOf:[Hash class]])
+				hashes[hash_count++] = (id)_osp->index[i];
+			else
+				panic ("object_space = %" PRIu32 ", index = %" PRIu32 " is not a tree or hash", _osp->n, i);
+		}
 	}
 
 	//
@@ -869,6 +873,9 @@ build_secondary (struct object_space* _osp)
 		}
 	}
 
+	//
+	// Если есть что индексировать
+	//
 	if (ntuples > 0)
 	{
 		title ("building_indexes/object_space: %i", _osp->n);
