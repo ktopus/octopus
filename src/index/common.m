@@ -815,7 +815,7 @@ index_conf_print(struct tbuf *out, const struct index_conf *c)
 void
 index_conf_write(struct tbuf *data, struct index_conf *c)
 {
-	char version = (c->notnull == 0) ? 0x10 : 0x11;
+	char version = !c->notnull ? 0x10 : 0x11;
 	write_i8(data, version);
 
 	write_i8(data, c->cardinality);
