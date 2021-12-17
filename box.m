@@ -811,7 +811,7 @@ build_secondary (struct object_space* _osp)
 		{
 			if ([_osp->index[i] isKindOf:[Tree class]])
 				trees[tree_count++] = (Tree*)_osp->index[i];
-			else if ([_osp->index[i] isKindOf:[Hash<HashIndex> class]])
+			else if ([_osp->index[i] isKindOf:[Hash class]] && [_osp->index[i] conformsToProtocol:@protocol(HashIndex)])
 				hashes[hash_count++] = (Hash<HashIndex>*)_osp->index[i];
 			else
 				panic ("object_space = %" PRIu32 ", index = %" PRIu32 " is not a tree or hash", _osp->n, i);
