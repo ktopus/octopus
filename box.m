@@ -967,7 +967,7 @@ build_secondary (struct object_space* _osp)
 		}
 
 		//
-		// Арументы операции сортировки
+		// Аргументы операции сортировки
 		//
 		struct print_dups_arg arg = {.space = _osp->n, .index = trees[i]->conf.n, NULL};
 		//
