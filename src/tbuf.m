@@ -56,6 +56,10 @@ tbuf_assert(const struct tbuf *b)
 #  define tbuf_assert(b) (void)0
 #endif
 
+/**
+ * Максимальный размер буфера
+ */
+#define TBUF_SIZE_MAX (256*1024*1024)
 
 struct tbuf *
 tbuf_alloc(struct palloc_pool *pool)
@@ -81,7 +85,7 @@ tbuf_ensure_resize(struct tbuf *e, size_t required)
 	if (diff < req) {
 		diff = req + required / 2;
 	}
-	assert(size + diff < 256 * 1024 * 1024);
+	assert((size + diff) < TBUF_SIZE_MAX);
 
 	void *p = prealloc(e->pool, e->ptr, size, size + diff);
 
@@ -89,6 +93,48 @@ tbuf_ensure_resize(struct tbuf *e, size_t required)
 	e->end = p + len;
 	e->free += diff;
 	tbuf_assert(e);
+}
+
+/**
+ * @brief Проверка, что добавление данных заданного размера в буфер не приведёт
+ *        к возникновению assert'а
+ *
+ * @param[in] _e буфер для проверки
+ * @param[in] _required размер данных, добавляемых в буфер
+ * @return 0 - если добавление данных в буфер приведёт к assert'у и 1 - если нет
+ *
+ * Выделение отдельной функции для проверки вызвано тем, что необходимо сохранить
+ * поведение самой функции tbuf_append (завершение программы на assert, если размер
+ * буфера превысит максимально допустимый). Это нужно, чтобы выявлять места, где ещё
+ * будет наблюдаться "выжирание" памяти в буфере и исправлять такие места по мере
+ * выявления не пытаясь сейчас исправить всё.
+ */
+int
+tbuf_enough (struct tbuf* _e, size_t _required)
+{
+	//
+	// Не используем логику проверки приращения размера буфера для
+	// случая, когда места там достаточно для размещаемых данных,
+	// так как в этом случае tbuf_ensure_resize вызываться не будет
+	// и попытки нарастить буфер так же делаться не будет
+	//
+	if (_required <= _e->free)
+		return 1;
+
+	//
+	// Дальше логика в точности повторяет логику вычисления приращения
+	// буфера в tbuf_ensure_resize. Они должны быть полностью
+	// синхронизированы, так как задача данной функции в том, чтобы
+	// гарантировать, что tbuf_ensure_resize не упадёт на assert при
+	// вычислении приращения буфера
+	//
+	size_t size = tbuf_size (_e);
+	size_t req = _required - _e->free;
+	size_t diff = size/2;
+	if (diff < req)
+		diff = req + _required/2;
+
+	return (size + diff) < TBUF_SIZE_MAX;
 }
 
 void
