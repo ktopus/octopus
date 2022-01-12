@@ -2448,10 +2448,17 @@ box_submit (struct box_txn* _tx)
 		struct tbuf* buf = tbuf_alloc (fiber->pool);
 
 		//
+		// Проверяем, что в буфере хватит места под заголовок tlv-структуры
+		// для мультиоперации
+		//
+		if (!tbuf_enough (buf, sizeof (struct tlv)))
+			return -1;
+
+		//
 		// Добавляем в буфер заголовок tlv-структуры с тэгом
 		// последовательности операций
 		//
-		int offm = tlv_add (buf, BOX_MULTI_OP);
+		int off_mop = tlv_add (buf, BOX_MULTI_OP);
 
 		//
 		// Для каждой операции транзакции
@@ -2459,10 +2466,17 @@ box_submit (struct box_txn* _tx)
 		TAILQ_FOREACH (bop, &_tx->ops, link)
 		{
 			//
+			// Проверяем, что в буфере хватит места под заголовок tlv-структуры,
+			// код операции и данные операции
+			//
+			if (!tbuf_enough (buf, sizeof (struct tlv) + sizeof (bop->op) + bop->data_len))
+				return -1;
+
+			//
 			// Добавляем в буфер заголовок tlv-структуры с тэгом
 			// одиночной операции
 			//
-			int offt = tlv_add (buf, BOX_OP);
+			int off_op = tlv_add (buf, BOX_OP);
 
 			//
 			// Добавляем в буфер код операции
@@ -2477,13 +2491,13 @@ box_submit (struct box_txn* _tx)
 			//
 			// Фиксируем размер данных tlv-структуры
 			//
-			tlv_end (buf, offt);
+			tlv_end (buf, off_op);
 		}
 
 		//
 		// Фиксируем размер данных tlv-структуры
 		//
-		tlv_end (buf, offm);
+		tlv_end (buf, off_mop);
 
 		//
 		// Записываем данные из буфера в журнал с тэгом tlv
