@@ -1214,6 +1214,13 @@ verify_indexes (struct object_space* _osp)
 	while ((obj = [pk iterator_next]))
 	{
 		//
+		// Проверяем только рекально существующие объекты
+		//
+		obj = tuple_visible_left (obj);
+		if (!obj)
+			continue;
+
+		//
 		// Для каждого объекта проходим по всем вторичным индексам
 		//
 		foreach_indexi (1, index, _osp)
@@ -1613,6 +1620,12 @@ snapshot_write_rows:(XLog*)_log
 			assert (n == osp->n);
 
 			//
+			// Проверяем, что все данные в таблице правильно проиндексированы,
+			// то есть таблица валидна и её данные можно записать в стапшот
+			//
+			verify_indexes (osp);
+
+			//
 			// Первичный ключ таблицы, по которому будем выполнять сканирование записей
 			//
 			Index<BasicIndex>* pk = osp->index[0];
@@ -1641,10 +1654,10 @@ snapshot_write_rows:(XLog*)_log
 			while ((obj = [pk iterator_next]))
 			{
 				//
-				// объект для вывода в журнал
+				// Объект для вывода в журнал
 				//
 				obj = tuple_visible_left (obj);
-				if (obj == NULL)
+				if (!obj)
 					continue;
 
 				//
@@ -1719,11 +1732,6 @@ snapshot_write_rows:(XLog*)_log
 						@throw [Error with_reason:"can't write index configuration into snapshot"];
 				}
 			}
-
-			//
-			// Проверяем, что все данные правильно проиндексированы
-			//
-			verify_indexes (osp);
 		}
 	}
 	@catch (Error* e)
