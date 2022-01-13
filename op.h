@@ -72,7 +72,12 @@ enum txn_mode
 	 * @brief Транзакция читает и модифицирует данные
 	 */
 	RW
-} mode;
+};
+
+/**
+ * @brief Режим работы транзакции
+ */
+extern enum txn_mode mode;
 
 /**
  * @brief Состояние транзакции
