@@ -37,6 +37,7 @@
 #include <unistd.h>
 
 lua_State *root_L = NULL;
+struct lua_src *lua_src;
 
 static int
 luaO_print(struct lua_State *L)
@@ -157,7 +158,7 @@ luaO_fiber_yield(struct lua_State *L _unused_)
 }
 
 
-static const struct luaL_reg fiberlib [] = {
+static const struct luaL_Reg fiberlib [] = {
 	{"create", luaO_fiber_create},
 	{"sleep", luaO_fiber_sleep},
 	{"gc", luaO_fiber_gc},

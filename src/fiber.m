@@ -58,6 +58,8 @@
 #include <unistd.h>
 #include <sysexits.h>
 
+struct SFiber fibers, zombie_fibers;
+
 struct Fiber* sched;
 coro_context *sched_ctx = NULL;
 #ifdef THREADS
