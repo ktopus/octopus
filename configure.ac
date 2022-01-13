@@ -221,6 +221,7 @@ AC_CC_FLAG_CHECK([-Wno-stringop-truncation], [WCFLAGS="-Wno-stringop-truncation 
 AC_CC_FLAG_CHECK([-Wno-address-of-packed-member], [WCFLAGS="-Wno-address-of-packed-member $WCFLAGS"])
 AC_CC_FLAG_CHECK([-Wno-enum-conversion], [WCFLAGS="-Wno-enum-conversion $WCFLAGS"])
 AC_CC_FLAG_CHECK([-Wno-overflow], [WCFLAGS="-Wno-overflow $WCFLAGS"])
+AC_CC_FLAG_CHECK([-Wno-arrayy-bounds], [WCFLAGS="-Wno-array-bounds $WCFLAGS"])
 AC_CC_FLAG_CHECK([-Wextra], [WCFLAGS="-Wextra $WCFLAGS"])
 AC_SUBST(WCFLAGS)
 
