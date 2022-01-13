@@ -37,6 +37,7 @@
 #include <unistd.h>
 
 lua_State *root_L = NULL;
+struct lua_src *lua_src;
 
 static int
 luaO_print(struct lua_State *L)

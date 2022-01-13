@@ -204,8 +204,8 @@ void iproto_mbox_put(struct iproto_mbox *mbox, struct iproto *msg);
 void iproto_pinger(va_list ap);
 struct iproto *iproto_rbuf_req(struct netmsg_io *io);
 
-struct iproto_ingress *blackhole_ingress;
-struct iproto_mbox *blackhole_mbox;
+extern struct iproto_ingress *blackhole_ingress;
+extern struct iproto_mbox *blackhole_mbox;
 
 
 u32 iproto_mbox_send(struct iproto_mbox *mbox, struct iproto_egress *peer,

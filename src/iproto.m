@@ -56,7 +56,6 @@
 	_(IPROTO_WRITTEN, 6)                            \
 	_(IPROTO_READ, 7)
 
-
 enum iproto_stat ENUM_INITIALIZER(STAT);
 static char const * const stat_ops[] = ENUM_STR_INITIALIZER(STAT);
 static int stat_base;

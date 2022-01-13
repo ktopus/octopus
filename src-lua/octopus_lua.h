@@ -28,13 +28,13 @@
 #include <third_party/luajit/src/lualib.h>
 #include <third_party/luajit/src/lauxlib.h>
 
-struct lua_State *root_L;
+extern struct lua_State *root_L;
 struct lua_src {
 	const char *name;
 	const char *start;
 	size_t size;
 };
-struct lua_src *lua_src;
+extern struct lua_src *lua_src;
 
 void luaO_init(void);
 int luaO_require(const char *filename);
