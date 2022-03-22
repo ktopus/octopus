@@ -378,9 +378,20 @@ info (struct tbuf* _out, const char* _what)
 				tbuf_printf (_out, "      slab_bytes: %zi"CRLF, osp->slab_bytes);
 				tbuf_printf (_out, "      indexes:"CRLF);
 
-				foreach_index (index, osp)
-					tbuf_printf (_out, "      - { index: %i, slots: %i, bytes: %zi }" CRLF,
-									index->conf.n, [index slots], [index bytes]);
+				foreach_index (index, osp) {
+                                        tbuf_printf (_out, "      - n: %i"CRLF, index->conf.n);
+                                        tbuf_printf (_out, "        slots: %i"CRLF, [index slots]);
+                                        tbuf_printf (_out, "        bytes: %zi"CRLF, [index bytes]);
+                                        tbuf_printf (_out, "        type: %s"CRLF, index_type(index->conf.type));
+                                        tbuf_printf (_out, "        unique: %s"CRLF, index->conf.unique ? "true" : "false");
+                                        tbuf_printf (_out, "        cardinality: %i"CRLF, index->conf.cardinality);
+                                        tbuf_printf (_out, "        fields:"CRLF);
+                                        for (int i = 0; i < index->conf.cardinality; i++) {
+                                                tbuf_printf (_out, "        - index: %i"CRLF, index->conf.field[i].index);
+                                                tbuf_printf (_out, "          type: %s"CRLF, index_field_type(index->conf.field[i].type));
+                                                tbuf_printf (_out, "          order: %s"CRLF, index_sort_order(index->conf.field[i].sort_order));
+                                        }
+                                }
 			}
 		}
 
