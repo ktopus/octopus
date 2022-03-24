@@ -102,6 +102,10 @@ void index_conf_write(struct tbuf *data, struct index_conf *c);
 void index_conf_read(struct tbuf *data, struct index_conf *c);
 void index_conf_print(struct tbuf *out, const struct index_conf *c);
 
+const char * index_type(enum index_type t);
+const char * index_field_type(enum index_field_type t);
+const char * index_sort_order(enum index_sort_order t);
+
 typedef struct index_node *(index_dtor)(struct tnt_object *obj, struct index_node *node, void *arg);
 struct dtor_conf {
 	index_dtor *u32, *u64, *lstr, *generic;
