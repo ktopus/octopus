@@ -200,7 +200,9 @@ local function loop_inner(ushard, key, conf)
             if count == batch_size then
                 if direction ~= 'head' and direction ~= 'tail' then
                     newkey = nxt(ix)
-                    newkey:make_long_living()
+                    if newkey ~= nil then
+                        newkey:make_long_living()
+                    end
                 else
                     newkey = true
                 end
