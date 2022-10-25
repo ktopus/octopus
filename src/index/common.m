@@ -756,7 +756,7 @@ index_conf_read(struct tbuf *data, struct index_conf *c)
 	}
 }
 
-static const char *
+const char *
 index_type(enum index_type t)
 {
 	switch (t) {
@@ -772,7 +772,7 @@ index_type(enum index_type t)
 	assert(false);
 }
 
-static const char *
+const char *
 index_field_type(enum index_field_type t)
 {
 	switch (t) {
@@ -790,7 +790,7 @@ index_field_type(enum index_field_type t)
 	assert(false);
 }
 
-static const char *
+const char *
 index_sort_order(enum index_sort_order t)
 {
 	switch (t) {
