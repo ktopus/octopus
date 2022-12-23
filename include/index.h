@@ -73,6 +73,7 @@ struct index_field_desc {
 		     union index_field *key = &node->key + index_conf->field[i].offset */,
 	   index /* of tuple field */;
 	char sort_order, type;
+	bool merged; // Признак поля, неявно добавленного к индексу
 };
 
 enum index_type {
@@ -90,6 +91,8 @@ struct index_conf {
 	     cardinality;
 	char type;
 	bool unique;
+	bool notnull; /* будут ли индексироваться объекты с NULL значениями индексируемых
+					 полей (notnull == 0) или не будут (notnull != 0) */
 	char n;
 	char fill_order[8]; /* indexes of field[] ordered as they appear in tuple,
 			       used by sequential scan in box_tuple_gen_dtor */

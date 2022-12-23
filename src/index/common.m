@@ -84,7 +84,7 @@ lstr_compare(const struct index_node *na, const struct index_node *nb, void *x _
 int
 cstr_compare(const struct index_node *na, const struct index_node *nb, void *x __attribute__((unused)))
 {
-        return CMP(strcmp(na->key.ptr, nb->key.ptr), 0);
+	return CMP(strcmp(na->key.ptr, nb->key.ptr), 0);
 }
 
 
@@ -119,7 +119,8 @@ cstr_compare_desc(const struct index_node *na, const struct index_node *nb, void
 	return cstr_compare(nb, na, x);
 }
 
-static inline int addr_compare(const struct index_node *na, const struct index_node *nb)
+static inline int
+addr_compare(const struct index_node *na, const struct index_node *nb)
 {
 	if ((uintptr_t)na->obj <= 1)
 		return 0;
@@ -711,27 +712,73 @@ index_conf_validate(struct index_conf *d)
 }
 
 void
-index_conf_merge_unique(struct index_conf *to, struct index_conf *from)
+index_conf_merge_unique (struct index_conf* to, struct index_conf* from)
 {
-	assert(!to->unique && from->unique);
-	int i, j, old_cardinality = to->cardinality;
-	for (i = 0; i < from->cardinality; i++) {
-		for (j = 0; j < to->cardinality; j++) {
+	//
+	// Дополнять полями уникального индекса можно только поля
+	// неуникального индекса
+	//
+	assert (!to->unique && from->unique);
+
+	//
+	// Запоминаем исходное число полей в индексе, который будем
+	// дополнять до уникального
+	//
+	int to_cardinality = to->cardinality;
+
+	//
+	// По всем полям уникального индекса
+	//
+	for (int i = 0; i < from->cardinality; ++i)
+	{
+		//
+		// Ищем соответствующее поле в неуникальном индексе
+		//
+		int j;
+		for (j = 0; j < to->cardinality; ++j)
+		{
 			if (to->field[j].index == from->field[i].index)
 				break;
 		}
+
+		//
+		// Если такое поле было явно задано в индексе, то ничего
+		// дополнять не надо
+		//
 		if (j < to->cardinality)
 			continue;
-		if (to->cardinality == nelem(to->field))
-			index_raise("index_conf.cardinality is too big during merge");
+
+		//
+		// Если вышли за пределы максимального числа индексируемых
+		// полей
+		//
+		if (to->cardinality == nelem (to->field))
+			index_raise ("index_conf.cardinality is too big during merge");
+
+		//
+		// Дополняем неуникальный индекс полем из уникального индекса
+		// и отмечаем его как заданное неявно. Все поля из уникального
+		// индекса добавляются после полей, явно заданных в неуникальном
+		// индексе, чтобы не нарушать порядок сканирования индекса при
+		// неполном задании списка полей
+		//
 		to->fill_order[j] = j;
 		to->field[j] = from->field[i];
-		to->cardinality++;
+		to->field[j].merged = true;
+		++to->cardinality;
 	}
 
-	if (old_cardinality != to->cardinality) {
-		index_conf_sort_fields(to);
-	}
+	//
+	// Если неуникальный индекс был дополнен, то заново пересортируем
+	// его поля
+	//
+	if (to_cardinality != to->cardinality)
+		index_conf_sort_fields (to);
+
+	//
+	// Объединённый индекс является уникальным, так как уникален один
+	// из исходных объединяемых индексов
+	//
 	to->unique = true;
 }
 
@@ -739,12 +786,13 @@ void
 index_conf_read(struct tbuf *data, struct index_conf *c)
 {
 	char version = read_i8(data);
-	if (version != 0x10)
+	if ((version != 0x10) && (version != 0x11))
 		index_raise("index_conf bad version");
 
 	c->cardinality = read_u8(data);
 	c->type = read_i8(data);
 	c->unique = read_u8(data);
+	c->notnull = (version >= 0x11) ? read_u8 (data) : 0;
 
 	if (c->cardinality > nelem(c->field))
 		index_raise("index_conf.cardinality is too big");
@@ -802,8 +850,8 @@ index_sort_order(enum index_sort_order t)
 void
 index_conf_print(struct tbuf *out, const struct index_conf *c)
 {
-	tbuf_printf(out, "i:%i min_tuple_cardinality:%i cardinality:%i type:%s unique:%i",
-		    c->n, c->min_tuple_cardinality, c->cardinality, index_type(c->type), c->unique);
+	tbuf_printf(out, "i:%i min_tuple_cardinality:%i cardinality:%i type:%s unique:%i notnull:%i",
+			c->n, c->min_tuple_cardinality, c->cardinality, index_type(c->type), c->unique, c->notnull);
 	for (int i = 0; i < c->cardinality; i++)
 		tbuf_printf(out, " field%i:{index:%i type:%s sort:%s}", i,
 			    c->field[i].index, index_field_type(c->field[i].type),
@@ -813,12 +861,14 @@ index_conf_print(struct tbuf *out, const struct index_conf *c)
 void
 index_conf_write(struct tbuf *data, struct index_conf *c)
 {
-	char version = 0x10;
+	char version = !c->notnull ? 0x10 : 0x11;
 	write_i8(data, version);
 
 	write_i8(data, c->cardinality);
 	write_i8(data, c->type);
 	write_i8(data, c->unique);
+	if (version >= 0x11)
+		write_i8(data, c->notnull);
 
 	for (int i = 0; i < c->cardinality; i++) {
 		write_i8(data, c->field[i].index);
