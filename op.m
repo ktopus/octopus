@@ -56,16 +56,35 @@
 enum txn_mode mode;
 
 /**
- * @brief Вставить запись в индекс
+ * @brief Вывести в лог список модификаций, связанных с заданной операцией
+ */
+#define TRACE_BOP_CELLS(_bop) \
+	{ \
+		struct box_phi_cell* xxx_cell; \
+		TAILQ_FOREACH (xxx_cell, &(_bop)->cells, bop_link) \
+		{ \
+			struct tnt_object* prev_obj = TAILQ_PREV (xxx_cell, phi_cells, phi_link) ? \
+					TAILQ_PREV (xxx_cell, phi_cells, phi_link)->obj : xxx_cell->phi->obj; \
+			say_debug3 ("%s[bop cells]: index:%d cell:%p phi:%p prev obj:%p obj:%p", \
+						__func__, xxx_cell->phi->index->conf.n, xxx_cell, xxx_cell->phi, prev_obj, xxx_cell->obj); \
+		} \
+	}
+
+/**
+ * @brief Вставить запись об изменении объекта в индекс
  *
  * @param _bop текущая операция
- * @param _index индекс, в который вставляется запись
- * @param _index_obj объект индекса, который находится по тому же ключу, что и вставляемая запись
- * @param _obj вставляемая запись
+ * @param _index индекс, в который вставляется объект
+ * @param _index_obj указатель на замещаемый объект в индексе (может указывать
+ *                   либо на собственно замещаемый объект либо на список версий
+ *                   объекта)
+ * @param _obj новая версия объекта для вставки в индекс
  */
 static void
 phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _index_obj, struct tnt_object* _obj)
 {
+	say_debug3 ("%s: _bop:%p _index:%d _index_obj:%p _obj:%p", __func__, _bop, _index->conf.n, _index_obj, _obj);
+
 	assert ((_index_obj != NULL) || (_obj != NULL));
 	assert ((_obj == NULL) || (_obj->type != BOX_PHI));
 
@@ -75,221 +94,227 @@ phi_insert (struct box_op* _bop, Index<BasicIndex>* _index, struct tnt_object* _
 	struct box_phi_cell* cell = NULL;
 
 	//
-	// В случае, если объект индекса представляет собой список изменений
+	// В случае, если замещаемый объект представляет собой список
+	// версий объекта
 	//
 	if (_index_obj && (_index_obj->type == BOX_PHI))
 	{
 		//
-		// Список изменений индекса
+		// Список версий объекта
 		//
-		struct box_phi* index_phi = box_phi (_index_obj);
+		struct box_phi* phi = box_phi (_index_obj);
 
 		//
-		// Проверяем, что мы добавляем запись в правильный индекс
+		// Проверяем согласованность индекса и находящегося в нём списка версий
+		// объекта
 		//
-		assert (index_phi->index == _index);
+		assert (phi->index == _index);
 
 		//
-		// Добавляем в индекс запись об изменении с новой записью
+		// Добавляем в индекс запись о новой версии объекта
 		//
-		cell = phi_cell_alloc (index_phi, _obj, _bop);
+		cell = phi_cell_alloc (phi, _obj, _bop);
 	}
 	else
 	{
 		//
-		// Добавляем в индекс вместо старой версии записи структуру для
-		// отслеживания изменений индекса
+		// Создаём список версий объекта
 		//
-		struct box_phi* index_phi = phi_alloc (_index, _index_obj, _bop);
+		// Это первая операция над индексом в транзакции, поэтому в индексе
+		// пока находится обычный объект
+		//
+		struct box_phi* phi = phi_alloc (_index, _index_obj, _bop);
 
 		//
-		// Добавляем в неё запись об изменении индекса с новой записью
+		// Добавляем в него запись о новой версии объекта
 		//
-		cell = phi_cell_alloc (index_phi, _obj, _bop);
+		cell = phi_cell_alloc (phi, _obj, _bop);
 
 		//
-		// Замещаем запись в индексе списком изменений
+		// Замещаем объект в индексе списком его версий
 		//
 		@try
 		{
-			[_index replace: &index_phi->header];
+			[_index replace:(struct tnt_object*)phi];
 		}
 		@catch (id e)
 		{
-			phi_free (index_phi);
 			phi_cell_free (cell);
+			phi_free (phi);
 			@throw;
 		}
 	}
 
 	//
-	// Добавляем информацию об изменении индекса в список изменений,
-	// связанный с операцией
+	// Добавляем информацию о новой версии объекта в список версий объекта
+	// для индексов, изменённых данной операцией
 	//
-	TAILQ_INSERT_TAIL (&_bop->phi, cell, bop_link);
+	TAILQ_INSERT_TAIL (&_bop->cells, cell, bop_link);
 }
 
 /**
- * @brief Зафиксировать заданное изменение индекса
+ * @brief Зафиксировать заданную версию объекта в индексе
  */
 static void
 phi_commit (struct box_phi_cell* _cell)
 {
-	say_debug3 ("%s: cell:%p phi:%p obj:%p", __func__, _cell, _cell->head, _cell->obj);
+	say_debug3 ("%s: index:%d phi:%p cell:%p obj:%p",
+				__func__, _cell->phi->index->conf.n, _cell->phi, _cell, _cell->obj);
 
 	//
-	// Список изменений, которому принадлежит данное изменение
+	// Список версий объекта, в котором находится данная версия
 	//
-	struct box_phi* index_phi = _cell->head;
+	struct box_phi* phi = _cell->phi;
 
 	//
-	// Проверяем, что запись об изменении является самой первой
-	// в списке, так как закоммитить можно только первую запись
-	// об изменении
+	// Проверяем, что данная версия является самой первой в списке версий
 	//
-	assert (_cell == TAILQ_FIRST (&index_phi->tailq));
+	// Коммитить версии из середины списка нельзя
 	//
-	// Запись должна существовать либо до либо после либо и до
-	// и после изменения (нельзя удалить ранее удалённую запись)
+	assert (_cell == TAILQ_FIRST (&phi->cells));
 	//
-	assert ((index_phi->obj != NULL) || (_cell->obj != NULL));
+	// Объект должен существовать либо до либо после либо и до и после операции
+	//
+	// Нельзя два раза подряд удалить один и тот же объект
+	//
+	assert ((phi->obj != NULL) || (_cell->obj != NULL));
 
 	//
-	// Если это одновременно и последнее изменение в списке
+	// Если это последняя версия объекта в списке версий объекта в индексе
 	//
-	if (_cell == TAILQ_LAST (&index_phi->tailq, phi_tailq))
+	if (_cell == TAILQ_LAST (&phi->cells, phi_cells))
 	{
 		//
-		// Если это операция удаления, то удаляем список изменений
-		// из индекса
+		// Если операция удалила объект из индекса, то удаляем весь список
+		// версий из индекса
 		//
 		if (_cell->obj == NULL)
-			[index_phi->index remove:&index_phi->header];
+			[phi->index remove:(struct tnt_object*)phi];
 		//
-		// Если это операция добавления или обновления, то замещаем
-		// список изменений в индексе финальной версией записи
+		// Если операция добавила или обновила объект, то замещаем список
+		// версий в индексе финальной версией объекта
 		//
 		else
-			[index_phi->index replace:_cell->obj];
+			[phi->index replace:_cell->obj];
 
 		//
-		// Удаляем список изменений из памяти, он больше не нужен
+		// Удаляем список версий объекта в индексе из памяти, он больше не нужен
 		//
-		// Саму запись об изменении из списка можно не удалять, так как
-		// она принадлежит другому объекту, а сам список является частью
-		// списка изменений
+		// Саму версию объекта из памяти не удаляем, так как она принадлежит операции
+		// и будет удалена вместе с ней. Из списка версий объекта в индексе её тоже не
+		// удаляем, так как удаляется сам список
 		//
-		phi_free (index_phi);
+		phi_free (phi);
 	}
+	//
+	// Если это не последняя версия объекта в индексе
+	//
 	else
 	{
 		//
-		// Запись должна существовать либо после изменения либо после
-		// последующего изменения либо и после их обоих (нельзя удалить
-		// уже удалённую запись)
+		// Объект должен существовать либо после данной операции либо после
+		// последующей операции либо и после них обеих (нельзя два раза подряд
+		// удалить один и тот же объект)
 		//
-		assert ((_cell->obj != NULL) || (TAILQ_NEXT (_cell, link)->obj != NULL));
+		assert ((_cell->obj != NULL) || (TAILQ_NEXT (_cell, phi_link)->obj != NULL));
 
 		//
-		// Фиксируем запись как подтверждённую
+		// Фиксируем версию объекта как текущую актуальную для всей транзакции
+		// для данного индекса
 		//
-		// Сама предыдущая версия записи будет удалена в вызывающей процедуре
+		// Саму версию объекта из памяти не удаляем, так как она принадлежит операции
+		// и будет удалена вместе с ней
 		//
-		index_phi->obj = _cell->obj;
+		phi->obj = _cell->obj;
 
 		//
-		// Удаляем запись об изменении из списка
+		// Удаляем версию объекта из списка версий объекта в индексе
 		//
-		TAILQ_REMOVE (&index_phi->tailq, _cell, link);
+		TAILQ_REMOVE (&phi->cells, _cell, phi_link);
 	}
 }
 
 /**
- * @brief Отменить заданное изменение индекса
+ * @brief Отменить заданную версию объекта в индексе
  */
 static void
 phi_rollback (struct box_phi_cell* _cell)
 {
-	say_debug3 ("%s: cell:%p phi:%p obj:%p", __func__, _cell, _cell->head, _cell->obj);
+	say_debug3 ("%s: index:%d phi:%p cell:%p obj:%p",
+				__func__, _cell->phi->index->conf.n, _cell->phi, _cell, _cell->obj);
 
 	//
-	// Список изменений, которому принадлежит данное изменение
+	// Список версий объекта в индексе, в котором находится данная версий
 	//
-	struct box_phi* index_phi = _cell->head;
+	struct box_phi* phi = _cell->phi;
 
 	//
-	// Проверяем, что запись об изменении является самой последней
-	// в списке, так как отменить можно только последнюю запись об
-	// изменении
+	// Проверяем, что данная версия является самой последней в списке
 	//
-	assert (_cell == TAILQ_LAST (&index_phi->tailq, phi_tailq));
+	// Отменять версии из середины списка нельзя
+	//
+	assert (_cell == TAILQ_LAST (&phi->cells, phi_cells));
 
 	//
-	// Если это не последняя запись об изменении в списке
+	// Если это не первая версия объекта в списке (то есть в списке
+	// присутствуют ещё версии)
 	//
-	if (_cell != TAILQ_FIRST (&index_phi->tailq))
+	if (_cell != TAILQ_FIRST (&phi->cells))
 	{
 		//
-		// Нельзя удалить уже удалённую запись
+		// В списке присутствует удаление два раза подряд одного и того же объекта.
+		// Такого быть не должно, это ошибка кода, поэтому ассертимся
 		//
-		assert ((TAILQ_PREV (_cell, phi_tailq, link)->obj != NULL) || (_cell->obj != NULL));
+		assert ((TAILQ_PREV (_cell, phi_cells, phi_link)->obj != NULL) || (_cell->obj != NULL));
 
 		//
-		// Просто удаляем запись об изменении из списка
+		// Просто удаляем версию объекта из списка делая актуальным предущее изменение.
+		// Саму версию из памяти не удаляем, так как она принадлежит операции и будет
+		// удалена вместе с ней
 		//
-		TAILQ_REMOVE (&index_phi->tailq, _cell, link);
+		TAILQ_REMOVE (&phi->cells, _cell, phi_link);
 	}
 	//
-	// Если это последняя запись об изменении в списке
+	// Если это последняя версия объекта в списке
 	//
 	else
 	{
 		//
-		// Нельзя удалить уже удалённую запись
+		// Последней версией объекта в списке присутствует операция удаления объекта
+		// которого не было до начала транзакции. Такого быть не должно, это ошибка
+		// кода, поэтому ассертимся
 		//
-		assert ((index_phi->obj != NULL) || (_cell->obj != NULL));
+		assert ((phi->obj != NULL) || (_cell->obj != NULL));
 
 		//
-		// Если изначально записи не существовало, то удаляем список
-		// изменений из индекса
+		// Если до начала транзакции объекта не существовало, то просто удаляем список
+		// версий объекта из индекса
 		//
-		if (index_phi->obj == NULL)
-			[index_phi->index remove:&index_phi->header];
+		if (phi->obj == NULL)
+			[phi->index remove:(struct tnt_object*)phi];
 		//
-		// Если запись существовала до начала транзакции, то вставляем
-		// её в индекс
+		// Если объект существовал до начала транзакции, то вставляем его изначальную
+		// версию в индекс вместо списка версий
 		//
 		else
-			[index_phi->index replace:index_phi->obj];
+			[phi->index replace:phi->obj];
 
 		//
 		// Удаляем список изменений из памяти, он больше не нужен
 		//
-		// Саму запись об изменении из списка можно не удалять, так как
-		// она принадлежит другому объекту, а сам список является частью
-		// списка изменений
+		// Саму запись об изменении из памяти не удаляем, так как она
+		// принадлежит операции. Из списка её тоже не удаляем, так как
+		// удаляется сам список
 		//
-		phi_free (index_phi);
+		phi_free (phi);
 	}
-}
-
-struct tnt_object*
-tuple_visible_left (struct tnt_object* _obj)
-{
-	return phi_left (_obj);
-}
-
-struct tnt_object*
-tuple_visible_right (struct tnt_object* _obj)
-{
-	return phi_right (_obj);
 }
 
 /**
  * @brief Удалить запись из таблицы
  */
 static void
-object_space_delete (struct box_op* bop, struct tnt_object* index_obj, struct tnt_object* _obj)
+object_space_delete (struct box_op* _bop, struct tnt_object* _pk_obj, struct tnt_object* _obj)
 {
 	if (_obj == NULL)
 		return;
@@ -297,12 +322,15 @@ object_space_delete (struct box_op* bop, struct tnt_object* index_obj, struct tn
 	//
 	// Модифицируемая таблица
 	//
-	struct object_space* osp = bop->object_space;
+	struct object_space* osp = _bop->object_space;
 
 	//
 	// Добавляем изменение с удалением объекта в первичный индекс
 	//
-	phi_insert (bop, osp->index[0], index_obj, NULL);
+	// Первичный индекс не может быть частичным, так как он должен
+	// содержать все объекты таблицы
+	//
+	phi_insert (_bop, osp->index[0], _pk_obj, NULL);
 
 	//
 	// Проходим по всем остальным индексам
@@ -310,36 +338,53 @@ object_space_delete (struct box_op* bop, struct tnt_object* index_obj, struct tn
 	foreach_indexi (1, index, osp)
 	{
 		//
-		// Объект, который находится в индексе по ключу объекта
+		// Должен ли объект находиться в индексе
 		//
-		struct tnt_object* index_old_obj = [index find_obj:_obj];
+		bool m = tuple_match (&index->conf, _obj);
 
 		//
-		// Последним объектом в списке изменений должен быть удаляемый объект
+		// Ищем объект в индексе (в случае частичного индекса объекта может в
+		// индексе и не быть)
 		//
-		assert (phi_right (index_old_obj) == _obj);
+		struct tnt_object* index_obj = [index find_obj:_obj];
 
 		//
-		// Добавляем изменение с удалением объекта в индекс
+		// Проверяем нахождение удаляемого объекта в индексе в зависимости
+		// от того, подходит ли он под условие включения в индекс или нет
 		//
-		phi_insert (bop, index, index_old_obj, NULL);
+		assert ((m && (phi_right (index_obj) == _obj)) || (!m && (phi_right (index_obj) == NULL)));
+
+		//
+		// Если объект находится в индексе, то исключаем его оттуда
+		//
+		// Здесь если по каким-то причинам объекта в индексе не было или он
+		// был оттуда уже удалён при выполнении одной из предыдущих операций,
+		// то повторное исключение объекта из индекса не делаем (то, что в
+		// индексе не должно быть двух операций исключения объекта из индекса
+		// подряд проверяется при подтверждении или откате тразнакции)
+		//
+		if (phi_right (index_obj))
+			phi_insert (_bop, index, index_obj, NULL);
 	}
+
+	TRACE_BOP_CELLS (_bop);
 }
 
 /**
- * @brief Добавить запись в таблицу
+ * @brief Добавить объект в таблицу
  *
  * @param[in] _bop выполняемая операция
- * @param[in] _index_obj объект первичного индекса, который модифицируется операцией
- * @param[in] _obj вставляемая запись
+ * @param[in] _pk_obj объект в первичном индексе, который модифицируется операцией
+ * @param[in] _obj вставляемый объект
  */
 static void
-object_space_insert (struct box_op* _bop, struct tnt_object* _index_obj, struct tnt_object* _obj)
+object_space_insert (struct box_op* _bop, struct tnt_object* _pk_obj, struct tnt_object* _obj)
 {
 	//
-	// Последняя версия записи должна быть пустой, однако цепочка версий может присутствовать
+	// Последняя версия объекта в первичном индексе должна быть пустой,
+	// однако цепочка версий может присутствовать
 	//
-	assert (phi_right (_index_obj) == NULL);
+	assert (phi_right (_pk_obj) == NULL);
 
 	//
 	// Модифицируемая таблица
@@ -347,150 +392,240 @@ object_space_insert (struct box_op* _bop, struct tnt_object* _index_obj, struct 
 	struct object_space* osp = _bop->object_space;
 
 	//
-	// Добавляем запись в первичный индекс
+	// Добавляем новую версию объекта в первичный индекс
 	//
-	phi_insert (_bop, osp->index[0], _index_obj, _obj);
+	// Первичный индекс не может быть частичным, так как он должен содержать
+	// все объекты таблицы
+	//
+	// Проверку на наличие объекта с таким ключём в первичном индексе уже
+	// выполнила вызывающая процедура, поэтому здесь её не делаем
+	//
+	phi_insert (_bop, osp->index[0], _pk_obj, _obj);
 
 	//
-	// Проходим по всем оставшимся индексам
+	// Проходим по всем вторичным индексам
 	//
-	foreach_indexi (1, idx, osp)
+	foreach_indexi (1, index, osp)
 	{
 		//
-		// Запись в индексе, соответствующая новой записи
+		// Объект в индексе, соответствующий новому объекту
 		//
-		struct tnt_object* index_obj = [idx find_obj:_obj];
+		// Здесь поиск ведётся по полям объекта, которые позволяют его однозначно
+		// идентифицировать. Если объект не соответствует условию включения его
+		// в индекс, то ничего найдено здесь не будет
+		//
+		// При создании неуникального индекса к нему неявно добавляются все поля
+		// первичного индекса, чтобы сделать его уникальным и контролировать наличие
+		// в индексе конкретного объекта, а не всех объектов с таким сочетанием
+		// значений индексируемых полей
+		//
+		struct tnt_object* index_obj = [index find_obj:_obj];
 
 		//
-		// Если в индексе найдена соответствующая запись, то выбрасываем исключение
+		// Поскольку при поиске объекта в неуникальном индексе учитываются поля
+		// первичного ключа (а его уникальность была проверена ранее), то наличие
+		// актуального объекта с заданным набором значений полей в неуникальном
+		// индексе является программной ошибкой
 		//
-		if (phi_right (index_obj) != NULL)
-			iproto_raise_fmt (ERR_CODE_INDEX_VIOLATION,
-								"duplicate key value violates unique index %i:%s",
-								idx->conf.n, [[idx class] name]);
+		assert (index->conf.unique || (phi_right (index_obj) == NULL));
 
 		//
-		// Добавляем запись в индекс
+		// Если объект должен быть включён в индекс
 		//
-		phi_insert (_bop, idx, index_obj, _obj);
+		// Для объектов, которые не соответствуют условию включения в индекс
+		// ничего с индексом не делаем
+		//
+		if (tuple_match (&index->conf, _obj))
+		{
+			//
+			// Для уникальных индексов наличие такого объекта не является программной
+			// ошибкой, так как для них поля первичного ключа к индексу не добавляются
+			// и фактически здесь мы проверяем уникальность объекта в пределах индекса,
+			// о нарушении которой необходимо сообщить пользователю
+			//
+			if (phi_right (index_obj) != NULL)
+			{
+				iproto_raise_fmt (ERR_CODE_INDEX_VIOLATION,
+									"duplicate key value violates unique index %i:%s",
+									index->conf.n, [[index class] name]);
+			}
+
+			phi_insert (_bop, index, index_obj, _obj);
+		}
 	}
+
+	TRACE_BOP_CELLS (_bop);
 }
 
 /**
- * @brief Заменить запись в таблице
+ * @brief Заменить объект в таблице
+ *
+ * @param[in] _bop операция, вызвавшая данное изменение
+ * @parma[in] _pk_old_obj объект в первичном индексе, который соответствут предыдущей
+ *                        версии объекта
+ * @parma[in] _old_obj предыдущая версия объекта
+ * @param[in] _obj новая версия объекта
  */
 static void
-object_space_replace (struct box_op* _bop, int _pk_modified, struct tnt_object* _index_obj, struct tnt_object* _old_obj, struct tnt_object* _obj)
+object_space_replace (struct box_op* _bop, int _pk_modified, struct tnt_object* _pk_index_old_obj, struct tnt_object* _old_obj, struct tnt_object* _obj)
 {
+	//
+	// Поскольку это операция замещения, то должны существовать обе
+	// версии объекта и старая и новая
+	//
+	assert (_pk_index_old_obj);
+	assert (_old_obj);
+	assert (_obj);
+
+	//
+	// Предыдущая версия объекта в первичном индексе должна совпадать
+	// с переданной предыдущей версией
+	//
+	assert (phi_right (_pk_index_old_obj) == _old_obj);
+
 	//
 	// Модифицируемая таблица
 	//
 	struct object_space* osp = _bop->object_space;
 
 	//
-	// Признак того, с какого индекса начинать модификацию по общему алгоритму.
-	// По умолчанию все индексы обрабатываем общим алгоритмом
-	//
-	int i = 0;
-
-	//
-	// Если данные, по которым запись индексируется первичным ключём не изменены,
-	// то используем при модификации индекса переданный объект, иначе модифицируем
-	// первичный индекс на общих основаниях по более затратному алгоритму
+	// Если данные, по которым объект индексируется первичным ключём,
+	// не изменены, то просто замещаем предыдущую версию объекта в
+	// первичном индексе новой версией
 	//
 	if (!_pk_modified)
 	{
+		phi_insert (_bop, osp->index[0], _pk_index_old_obj, _obj);
+	}
+	else
+	{
 		//
-		// Добавляем запись в первичный индекс
+		// Объект в первичном индексе, который совпадает по ключу с новой
+		// версией объекта
 		//
-		phi_insert (_bop, osp->index[0], _index_obj, _obj);
+		// Поскольку в данной ветке алгоритма поля первичного ключа объекта
+		// не совпадают с полями первичного ключа старой версии объекта, то
+		// это гарантированно должен быть объект, отличный от старого
+		//
+		struct tnt_object* pk_index_obj = [osp->index[0] find_obj:_obj];
 
 		//
-		// Если первичный индекс модифицирован, то продолжаем итерации
-		// со следующего индекса
+		// Если такой объект был найден и его последняя версия актуальна, то
+		// диагностируем ошбку - попытка добавить в таблицу объект с неуникальным
+		// первичным ключём
 		//
-		i = 1;
+		if (phi_right (pk_index_obj))
+		{
+			iproto_raise_fmt (ERR_CODE_INDEX_VIOLATION,
+								"duplicate key value violates unique primary index %i:%s",
+								0, [[osp->index[0] class] name]);
+		}
+
+		//
+		// Удаляем из индекса предыдущую версию объекта
+		//
+		phi_insert (_bop, osp->index[0], _pk_index_old_obj, NULL);
+		//
+		// Добавляем в индекс новую версию объекта
+		//
+		phi_insert (_bop, osp->index[0], pk_index_obj, _obj);
 	}
 
 	//
-	// Проходим по всем индексам начиная с заданного
+	// Проходим по всем вторичным индексам
 	//
-	foreach_indexi (i, idx, osp)
+	foreach_indexi (1, index, osp)
 	{
 		//
-		// Объект в индексе, который совпадает по ключу с новой версией записи
+		// Объект в индексе, соответсвующий новой версии объекта
 		//
-		struct tnt_object* index_obj = [idx find_obj:_obj];
+		// Здесь поиск ведётся по полям объекта, которые позволяют его однозначно
+		// идентифицировать, так как при создании неуникального индекса к нему
+		// неявно добавляются все поля первичного индекса, чтобы сделать его
+		// уникальным и контролировать наличие в индексе конкретного объекта
+		//
+		struct tnt_object* index_obj = [index find_obj:_obj];
 
 		//
-		// Если последняя версия такого объекта пустая (была удалена или
-		// ключевые данные записи изменились и записи с таким ключем не
-		// существует)
+		// Если объект в индексе существует и содержит актуальную версию объекта,
+		// совпадающего по ключевым полям индекса с новым объектом, но при этом
+		// не является его предыдущей версией, то это ошибка
 		//
-		if (phi_right (index_obj) == NULL)
-		{
-			//
-			// Ищем запись в индексе по её предыдущей версии
-			//
-			struct tnt_object* index_old_obj = [idx find_obj:_old_obj];
-
-			//
-			// Последняя версия записи в индексе должна совпадать с переданной
-			// предыдущей версией
-			//
-			assert (phi_right (index_old_obj) == _old_obj);
-
-			//
-			// Удаляем из индекса предыдущую версию записи
-			//
-			phi_insert (_bop, idx, index_old_obj, NULL);
-			//
-			// Добавляем в индекс новую версию записи
-			//
-			phi_insert (_bop, idx, index_obj, _obj);
-		}
+		// Поскольку для уникальных индексов поля первичного индекса не добавляются,
+		// то здесь мы контролируем уникальность объекта в пределах уникального индекса
+		// (так как объекты с разными первичными ключами могут быть эквивалентны по
+		// индексируемым полям). Это проблема клиента, сообщаем ему об этом
 		//
-		// Если ключевые данные записи не изменились
-		//
-		else if (phi_right (index_obj) == _old_obj)
-		{
-			//
-			// Просто добавляем новую версия записи в индекс
-			//
-			phi_insert (_bop, idx, index_obj, _obj);
-		}
-		//
-		// Иначе ошибка - попытка добавить в индекс запись к таким же ключем,
-		// как уже одна из существующих в индексе записей
-		//
-		else
+		if (phi_right (index_obj) && (phi_right (index_obj) != _old_obj))
 		{
 			iproto_raise_fmt (ERR_CODE_INDEX_VIOLATION,
 								"duplicate key value violates unique index %i:%s",
-								idx->conf.n, [[idx class] name]);
+								index->conf.n, [[index class] name]);
+		}
+
+		//
+		// Если это тот же самый объект, то это означает, что его индексируемые поля
+		// для данного индекса не изменились, а следовательно не изменились и условия
+		// включения данного объекта в индекс, если он условный. Так что дополнительно
+		// можно ничего не проверять и просто добавить в индекс новую версию объекта
+		//
+		if (phi_right (index_obj) == _old_obj)
+		{
+			phi_insert (_bop, index, index_obj, _obj);
+		}
+		//
+		// Если объекта с такими ключевыми полями в данном индексе нет (был из индекса
+		// удалён предыдущей операцией или его вовсе не было в индексе)
+		//
+		else
+		{
+			//
+			// Ищем в индексе предыдущую версию объекта
+			//
+			struct tnt_object* index_old_obj = [index find_obj:_old_obj];
+
+			//
+			// Если такая версия есть и она актуальна (поскольку индекс может быть
+			// условным, то её может и не быть или она может быть не актуальна и
+			// тогда ничего со старой версией делать не надо), то исключаем её из
+			// индекса (так как это операция замещения старого объекта на новый, то
+			// делаем это не зависимо от того, попадает ли новая версия объекта в
+			// индекс или нет)
+			//
+			if (phi_right (index_old_obj))
+				phi_insert (_bop, index, index_old_obj, NULL);
+
+			//
+			// Если новая версия объекта попадает под условие включения его в
+			// индекс, то добавляем её туда
+			//
+			if (tuple_match (&index->conf, _obj))
+				phi_insert (_bop, index, index_obj, _obj);
 		}
 	}
+
+	TRACE_BOP_CELLS (_bop);
 }
 
 void
 prepare_replace (struct box_op* _bop, size_t _cardinality, const void* _data, u32 _len)
 {
 	//
-	// Если количество полей записи равно 0, то это ошибка
+	// Если количество полей объекта равно 0, то это ошибка
 	//
 	if (_cardinality == 0)
 		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "cardinality can't be equal to 0");
 
 	//
-	// Если размер блока данных записи имеет нулевой размер или он не
-	// совпадает с размером записи, посчитанным по её полям, то это
-	// ошибка
+	// Если размер блока данных объекта имеет нулевой размер или он
+	// не совпадает с размером объекта, посчитанным по его полям, то
+	// это ошибка
 	//
 	if ((_len == 0) || (fields_bsize (_cardinality, _data, _len) != _len))
 		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "tuple encoding error");
 
 	//
-	// Копируем данные записи в операцию
+	// Копируем данные новой версии объекта в операцию
 	//
 	_bop->obj = tuple_alloc (_cardinality, _len);
 	memcpy (tuple_data (_bop->obj), _data, _len);
@@ -501,58 +636,56 @@ prepare_replace (struct box_op* _bop, size_t _cardinality, const void* _data, u3
 	Index<BasicIndex>* pk = _bop->object_space->index[0];
 
 	//
-	// Ищем запись в первичном индексе. Это может быть как сама запись, так
+	// Ищем объект в первичном индексе. Это может быть как сам объект, так
 	// и box_phi структура, которая содержит выполненные в данной транзакции
 	// операции над индексом
 	//
 	struct tnt_object* index_obj = [pk find_obj:_bop->obj];
 
 	//
-	// Запоминаем в операции указатель на предыдущую версию записи
+	// Запоминаем в операции указатель на предыдущую версию объекта
 	//
 	_bop->old_obj = phi_right (index_obj);
 
 	//
-	// Если это замена предыдущей версии записи, то количество изменённых записей
-	// равно 2 иначе - 1
+	// Если это замена предыдущей версии объекта, то количество изменённых
+	// объектов равно 2 иначе - 1
 	//
 	_bop->obj_affected = (_bop->old_obj != NULL) ? 2 : 1;
 
 	//
-	// Если это должна быть операция добавления записи и при этом
+	// Если это должна быть операция добавления объекта и при этом
 	// найдена предыдущая версия, то это ошибка
 	//
 	if ((_bop->flags & BOX_ADD) && (_bop->old_obj != NULL))
 		iproto_raise (ERR_CODE_NODE_FOUND, "tuple found");
 
 	//
-	// Если это должна быть операция замены предыдущей версии записи и при этом
-	// предыдущая версия записи не найдена, то это ошибка
+	// Если это должна быть операция замены предыдущей версии объекта и при
+	// этом предыдущая версия объекта не найдена, то это ошибка
 	//
 	if ((_bop->flags & BOX_REPLACE) && (_bop->old_obj == NULL))
 		iproto_raise (ERR_CODE_NODE_NOT_FOUND, "tuple not found");
 
-	say_debug ("%s: old_obj:%p obj:%p", __func__, _bop->old_obj, _bop->obj);
-
 	//
-	// Если предыдущая версия записи отсутствует, то добавляем запись
+	// Если предыдущая версия объекта отсутствует, то добавляем объект
 	//
 	if (_bop->old_obj == NULL)
 		object_space_insert (_bop, index_obj, _bop->obj);
 	//
-	// Иначе заменяем запись на новую
+	// Иначе заменяем объект на его новую версию
 	//
 	else
 		object_space_replace (_bop, 0, index_obj, _bop->old_obj, _bop->obj);
 }
 
 /**
- * @brief Полный размер заголовка для компактной записи
+ * @brief Полный размер заголовка для компактной записи объекта
  */
 #define small_tuple_overhead (sizeof (struct tnt_object) + sizeof (struct box_small_tuple))
 
 /**
- * @brief Полный размер заголовка для обычной записи
+ * @brief Полный размер заголовка для обычной записи объекта
  */
 #define tuple_overhead (sizeof (struct gc_oct_object) + sizeof (struct box_tuple))
 
@@ -614,7 +747,8 @@ snap_insert_row (struct object_space* _osp, size_t _cardinality, const void* _da
 		//
 		// Добавляем запись в первичный индекс
 		//
-		// FIXME: где добавление записи в другие индексы?
+		// Добавление объекта в другие индексы будет сделано при их перестроении
+		// после полной загрузки данных
 		//
 		[_osp->index[0] replace: obj];
 
@@ -922,8 +1056,6 @@ do_field_splice (struct tbuf* _buf, const void* _args, u32 _size)
 	if (data_size > (UINT32_MAX - (tbuf_len (_buf) - nlength)))
 		iproto_raise (ERR_CODE_ILLEGAL_PARAMS, "do_field_splice: list_size is too long");
 
-	say_debug ("do_field_splice: noffset = %i, nlength = %i, data_size = %u", noffset, nlength, data_size);
-
 	//
 	// Инициализируем новый буфер (FIXME: а есть необходимость после tbuf_alloc?)
 	//
@@ -956,7 +1088,7 @@ do_field_splice (struct tbuf* _buf, const void* _args, u32 _size)
 }
 
 /**
- * @brief Возвращает признак того, что индексируемые поля записи изменятся
+ * @brief Возвращает признак того, что индексируемые поля объекта изменятся
  *        при изменении заданного поля
  *
  * @param[in] _idx проверяемый индекс
@@ -978,7 +1110,7 @@ idxModified (Index<BasicIndex>* _idx, u32 _field, int _modified)
 }
 
 /**
- * @brief Возвращает признак того, что индексируемые поля записи будут
+ * @brief Возвращает признак того, что индексируемые поля объекта будут
  *        сдвинуты при добавлении или удалении заданного поля
  *
  * @param _idx проверяемый индекс
@@ -1471,7 +1603,7 @@ prepare_update_fields (struct box_op* _bop, struct tbuf* _args)
 	}
 
 	//
-	// Если изменился ключ записи, то увеличиваем количество изменённых объектов
+	// Если изменился ключ объекта, то увеличиваем количество изменённых объектов
 	//
 	// FIXME: не понятно, почему используется функция, а не переменная pk_modified
 	//
@@ -1479,7 +1611,7 @@ prepare_update_fields (struct box_op* _bop, struct tbuf* _args)
 		++_bop->obj_affected;
 
 	//
-	// Замещаем запись её новой версией
+	// Замещаем объект его новой версией
 	//
 	object_space_replace (_bop, pk_modified, index_old, _bop->old_obj, _bop->obj);
 }
@@ -1770,7 +1902,7 @@ box_op_alloc (struct box_txn* _txn, int _op, const void* _data, int _len)
 	bop->txn      = _txn;
 	bop->op       = _op & 0xffff;
 	bop->data_len = _len;
-	TAILQ_INIT (&bop->phi);
+	TAILQ_INIT (&bop->cells);
 
 	memcpy (bop->data, _data, _len);
 
@@ -1842,7 +1974,7 @@ box_prepare (struct box_txn* _txn, int _op, const void* _data, u32 _len)
 				//
 				u32 cardinality = read_u32 (&buf);
 				//
-				// Размер записи
+				// Размер данных записи
 				//
 				u32 tuple_blen = tbuf_len (&buf);
 				//
@@ -2053,13 +2185,14 @@ box_op_commit (struct box_op* _bop)
 	if (_bop->old_obj)
 		bytes_usage (_bop->object_space, _bop->old_obj, -1);
 
+	TRACE_BOP_CELLS (_bop);
 	//
 	// Проходим по всему списку изменений, которые привязаны к
 	// данной операции
 	//
 	struct box_phi_cell* cell;
 	struct box_phi_cell* tmp;
-	TAILQ_FOREACH_SAFE (cell, &_bop->phi, bop_link, tmp)
+	TAILQ_FOREACH_SAFE (cell, &_bop->cells, bop_link, tmp)
 	{
 		//
 		// Подтверждаем изменение и удаляем его из списка,
@@ -2068,7 +2201,7 @@ box_op_commit (struct box_op* _bop)
 		phi_commit (cell);
 
 		//
-		// Удаляем изменение, оно больше не нужно
+		// Удаляем изменение из памяти, оно больше не нужно
 		//
 		phi_cell_free (cell);
 	}
@@ -2141,7 +2274,7 @@ box_op_rollback (struct box_op* _bop)
 	//
 	struct box_phi_cell* cell;
 	struct box_phi_cell* tmp;
-	TAILQ_FOREACH_REVERSE_SAFE (cell, &_bop->phi, phi_tailq, bop_link, tmp)
+	TAILQ_FOREACH_REVERSE_SAFE (cell, &_bop->cells, phi_cells, bop_link, tmp)
 	{
 		//
 		// Отменяем изменение и удаляем его из списка,
@@ -2280,7 +2413,7 @@ box_submit (struct box_txn* _tx)
 		else
 		{
 			struct box_phi_cell* cell;
-			TAILQ_FOREACH (cell, &bop->phi, bop_link)
+			TAILQ_FOREACH (cell, &bop->cells, bop_link)
 				assert (cell->obj == NULL);
 		}
 

@@ -581,6 +581,12 @@ configure_index (int _i, int _j, Index* _pk)
 		panic ("(object_space = %" PRIu32 ") object_space PK index must be unique", _i);
 
 	//
+	// ... и не может быть частичным
+	//
+	if ((_j == 0) && ic->notnull)
+		panic ("(object_space = %" PRIu32 ") object_space PK index must include all objects and can't be notnull", _i);
+
+	//
 	// Для остальных неуникальных индексов добавляем в них поля
 	// первичного индекса для того, чтобы сделать их уникальными
 	//
@@ -730,6 +736,9 @@ on_duplicate_action (int _spaceno, int _indexno)
 	return cfg.no_panic_on_snapshot_duplicates ? DUP_IGNORE : DUP_PANIC;
 }
 
+/**
+ * @brief Удаление из таблицы найденных дубликатов
+ */
 static void
 delete_duplicates (struct object_space* _osp, size_t _node_size, uint32_t* _indexes, uint32_t _icount, void* _nodes)
 {
@@ -778,58 +787,75 @@ delete_duplicates (struct object_space* _osp, size_t _node_size, uint32_t* _inde
 	}
 }
 
+/**
+ * @brief Построение вторичных индексов для таблицы
+ */
 static void
 build_secondary (struct object_space* _osp)
 {
 	//
-	// Первичный индекс и количество записей
+	// Первичный индекс и общее количество объектов в таблице
 	//
 	Index<BasicIndex>* pk = _osp->index[0];
 	size_t ntuples = [pk size];
 
 	//
-	// Индексы типа двоичное дерево
+	// Если данных в таблице нет, то и индексировать нечего
+	//
+	if (ntuples == 0)
+		return;
+
+	//
+	// Древовидные индексы
 	//
 	Tree* trees[MAX_IDX] = {nil,};
 	int tree_count = 0;
 
 	//
-	// Индексы типа хэш
+	// Прочие индексы, для которых нам нужна только поддержка метода
+	// replace:
 	//
-	id<HashIndex> hashes[MAX_IDX] = {nil,};
-	int hash_count = 0;
+	// Поскольку в конфигурации таблицы жёстко прошито, что все индексы
+	// должны поддерживать интерфейс Index с протоколом BasicIndex, то
+	// каких-то дополнительных проверок здесь не делаем
+	//
+	// FIXME: PHash не поддерживает протокол BasicIndex в полном объёме,
+	//        я не знаю, проблема это или нет
+	//
+	Index<BasicIndex>* others[MAX_IDX] = {nil,};
+	int other_count = 0;
 
 	//
-	// Разделяем все индексы, начиная со второго на двоичные и хэши
+	// Разделяем все вторичные индексы на древовидные и остальные, поскольку
+	// для древовидных индексов можно использовать более широкий функционал
+	// (исключение дубликатов с предварительной сортировкой узлов)
 	//
 	for (int i = 1; i < MAX_IDX; ++i)
 	{
-		if (_osp->index[i] == nil)
-			continue;
-
-		if ([_osp->index[i] isKindOf:[Tree class]])
-			trees[tree_count++] = (id)_osp->index[i];
-		else
-			hashes[hash_count++] = (id)_osp->index[i];
+		if (_osp->index[i])
+		{
+			if ([_osp->index[i] isKindOf:[Tree class]])
+				trees[tree_count++] = (Tree*)_osp->index[i];
+			else
+				others[other_count++] = _osp->index[i];
+		}
 	}
 
 	//
-	// Если дополнительных индексов нет, то завершаем работу, так как
-	// первичный индекс всегда уникален и это означает, что дубликатов
-	// нет
+	// Если вторичных индексов нет, то завершаем работу, перестраивать нечего
 	//
-	if ((tree_count == 0) && (hash_count == 0))
+	if ((tree_count == 0) && (other_count == 0))
 		return;
 
-	say_info ("Building secondary indexes of object space %i", _osp->n);
-
 	//
-	// При наличии записей заполняем конфигурацию dup_conf, которая является
-	// глобальной и используется затем в функции on_duplicate_action при
-	// определении действия, выполняемого для найденных дубликатов
+	// Заполняем конфигурацию dup_conf, которая является глобальной для всех
+	// древовидных индексов таблицы и используется затем в функции on_duplicate_action
+	// при определении действия, выполняемого для найденных дубликатов
 	//
-	if ((ntuples > 0) && cfg.on_snapshot_duplicates)
+	if (cfg.on_snapshot_duplicates)
 	{
+		assert (dup_conf == NULL);
+
 		int cnt = 0;
 		for (int i = 0; cfg.on_snapshot_duplicates[i]; ++i)
 		{
@@ -868,50 +894,74 @@ build_secondary (struct object_space* _osp)
 		}
 	}
 
-	if (ntuples > 0)
+	say_info ("Building secondary indexes of object space %i", _osp->n);
+	title ("building_indexes/object_space: %i", _osp->n);
+
+	//
+	// Перестраиваем недревовидные индексы
+	//
+	if (other_count > 0)
 	{
-		title ("building_indexes/object_space: %i", _osp->n);
-
 		struct tnt_object* obj = NULL;
-
-		//
-		// Перестраиваем хэш-индексы
-		//
 		[pk iterator_init];
 		while ((obj = [pk iterator_next]))
 		{
-			for (int i = 0; i < hash_count; ++i)
-			{
-				if ([hashes[i] find_obj:obj] != NULL)
-				{
-					say_error ("got duplicate in n:%i index:%i, replace this unique HASH index with non unique TREE index",
-							   _osp->n, ((Index*)hashes[i])->conf.n);
-				}
-
-				[hashes[i] replace:obj];
-			}
-		}
-
-		//
-		// Перестраиваем двоичные индексы с возможным удалением дубликатов
-		//
-		for (int i = 0; i < tree_count; ++i)
-		{
-			say_info ("    %i: %s", trees[i]->conf.n, [[trees[i] class] name]);
-
-			//
-			// Распределяем память под узлы двоичного индекса
-			//
-			void* nodes = xmalloc (ntuples*trees[i]->node_size);
-
-			//
-			// Иницикализируем массив узлов индекса
-			//
-			[pk iterator_init];
-			for (u32 t = 0; (obj = [pk iterator_next]); ++t)
+			for (int i = 0; i < other_count; ++i)
 			{
 				//
-				// Удел для инициализации
+				// Учитываем, что индекс может быть частичным
+				//
+				if (tuple_match (&others[i]->conf, obj))
+				{
+					@try
+					{
+						[others[i] replace:obj];
+					}
+					@catch (id e)
+					{
+						say_error ("can't insert object into osp:%i index:%i, try to replace this index with non unique TREE index",
+								   _osp->n, others[i]->conf.n);
+					}
+				}
+			}
+		}
+	}
+
+	//
+	// Перестраиваем древовидные индексы с возможным удалением дубликатов
+	//
+	for (int i = 0; i < tree_count; ++i)
+	{
+		say_info ("    %i: %s", trees[i]->conf.n, [[trees[i] class] name]);
+
+		//
+		// Распределяем память под узлы древовидного индекса
+		//
+		// Резервируем память под все объекты таблицы даже для частичных индексов, так
+		// проще. Подсчёт реального количества объектов, подходящих под условие включения
+		// в частичный индекс сделаем одновременно с инициализацией соответствующих узлов
+		//
+		void* nodes = xmalloc (ntuples*trees[i]->node_size);
+
+		//
+		// Число инициализированных узлов (учитываем, что индексы могут быть частичными)
+		//
+		u32 t = 0;
+
+		//
+		// Инициализируем массив узлов индекса
+		//
+		struct tnt_object* obj = NULL;
+		[pk iterator_init];
+		while ((obj = [pk iterator_next]))
+		{
+			//
+			// Учитываем, что индекс может быть частичным
+			//
+			if (tuple_match (&trees[i]->conf, obj))
+			{
+				//
+				// Узел индекса для инициализации
 				//
 				struct index_node* node = nodes + t*trees[i]->node_size;
 
@@ -919,80 +969,89 @@ build_secondary (struct object_space* _osp)
 				// Инициализация узла
 				//
 				trees[i]->dtor (obj, node, trees[i]->dtor_arg);
+
+				//
+				// Число инициализированных узлов
+				//
+				++t;
 			}
+		}
+
+		//
+		// Аргументы операции сортировки
+		//
+		struct print_dups_arg arg = {.space = _osp->n, .index = trees[i]->conf.n, NULL};
+		//
+		// Действие при нахождении дубликатов для индексов, которые отмечены
+		// как уникальные
+		//
+		enum dup_action action = on_duplicate_action (arg.space, arg.index);
+		//
+		// Если задано удаление дубликатов, то создаём буфер для записи
+		// индексов дубликатов для удаления
+		//
+		if (action == DUP_DELETE)
+			arg.positions = tbuf_alloc (fiber->pool);
+
+		//
+		// Сортируем массив инициализированных узлов индекса по возрастанию. При этом
+		// если индекс сконфигурирован как уникальный, то для всех найденных дубликатов
+		// будет вызываться функция box_idx_print_dups и если дубликаты были найдены,
+		// то будет возвращён признак false
+		//
+		if (![trees[i] sort_nodes:nodes count:t onduplicate:box_idx_print_dups arg:(void*)&arg])
+		{
+			say_debug ("space %d index %d FOUND DUPS!!! action is %s", arg.space, arg.index,
+						((action == DUP_PANIC) ? "PANIC" : (action == DUP_IGNORE) ? "IGNORE" : "DELETE"));
+
+			if (action != DUP_IGNORE)
+				say_error ("if you want to ignore this duplicates, add " \
+							"on_snapshot_duplicates[%d].index[%d].action=\"IGNORE\"",
+								arg.space, arg.index);
+
+			if (action != DUP_DELETE)
+				say_error ("if you want to delete duplicates rows, add " \
+							"on_snapshot_duplicates[%d].index[%d].action=\"DELETE\"",
+								arg.space, arg.index);
+
+			if (action == DUP_PANIC)
+				panic ("duplicate tuples");
 
 			//
-			// Арументы операции сортировки
-			//
-			struct print_dups_arg arg = {.space = _osp->n, .index = trees[i]->conf.n, NULL};
-			//
-			// Действие при нахождении дубликатов для индексов, которые отмечены
-			// как уникальные
-			//
-			enum dup_action action = on_duplicate_action (arg.space, arg.index);
-			//
-			// Если задано удаление дубликатов, то создаём буфер для записи
-			// индексов дубликатов для удаления
+			// В случае если задано удаление дубликатов
 			//
 			if (action == DUP_DELETE)
-				arg.positions = tbuf_alloc (fiber->pool);
-
-			//
-			// Сортируем массив узлов индекса по возрастанию. При этом если индекс сконфигурирован
-			// как уникальный, то для всех найденных дубликатов будет вызываться функция
-			// box_idx_print_dups и если дубликаты были найдены, то будет возвращён признак
-			// false
-			//
-			if (![trees[i] sort_nodes:nodes count:ntuples onduplicate:box_idx_print_dups arg:(void*)&arg])
 			{
-				say_debug ("space %d index %d FOUND DUPS!!! action is %s", arg.space, arg.index,
-							((action == DUP_PANIC) ? "PANIC" : (action == DUP_IGNORE) ? "IGNORE" : "DELETE"));
-
-				if (action != DUP_IGNORE)
-					say_error ("if you want to ignore this duplicates, add " \
-								"on_snapshot_duplicates[%d].index[%d].action=\"IGNORE\"",
-									arg.space, arg.index);
-
-				if (action != DUP_DELETE)
-					say_error ("if you want to delete duplicates rows, add " \
-								"on_snapshot_duplicates[%d].index[%d].action=\"DELETE\"",
-									arg.space, arg.index);
-
-				if (action == DUP_PANIC)
-					panic ("duplicate tuples");
+				say_error ("DON'T FORGET TO SAVE SNAPSHOT AS SOON AS POSSIBLE!!!!!!!!");
 
 				//
-				// В случае если задано удаление дубликатов
+				// Общее число позиций узлов в массиве дубликатов (используем тот факт,
+				// что все 32x битные целые выводятся в буфер как есть)
 				//
-				if (action == DUP_DELETE)
-				{
-					//
-					// Общее число позиций узлов в массиве дубликатов (используем тот факт,
-					// что все 32x битные целые выводятся в буфер как есть)
-					//
-					uint32_t npos = tbuf_len (arg.positions)/sizeof (int32_t);
+				uint32_t npos = tbuf_len (arg.positions)/sizeof (uint32_t);
 
-					//
-					// Пишем в конец общее количество узлов в массиве nodes
-					//
-					write_i32 (arg.positions, ntuples);
+				//
+				// Пишем в конец общее количество инициализированных узлов в массиве nodes
+				//
+				write_i32 (arg.positions, t);
 
-					//
-					// Удаляем дубликаты из массива узлов индекса
-					//
-					delete_duplicates (_osp, trees[i]->node_size, arg.positions->ptr, npos, nodes);
+				//
+				// Удаляем дубликаты из массива инициализированных узлов индекса
+				//
+				delete_duplicates (_osp, trees[i]->node_size, arg.positions->ptr, npos, nodes);
 
-					//
-					// Уменьшаем общее число узлов на количество удалённых дубликатов
-					//
-					ntuples -= npos;
-
-					say_error ("DON'T FORGET TO SAVE SNAPSHOT AS SOON AS POSSIBLE!!!!!!!!");
-				}
+				//
+				// Уменьшаем общее число инициализированных узлов на количество удалённых
+				// дубликатов
+				//
+				t -= npos;
 			}
-
-			[trees[i] set_sorted_nodes:nodes count:ntuples];
 		}
+
+		//
+		// После загрузки данных в индекс массив nodes будет удалён
+		//
+		[trees[i] set_sorted_nodes:nodes count:t];
 	}
 
 	if (dup_conf != NULL)
@@ -1005,7 +1064,7 @@ build_secondary (struct object_space* _osp)
 }
 
 /**
- * @brief Создание дополнительных индексов в соответствии с конфигурацией
+ * @brief Создание вторичных индексов в соответствии с конфигурацией
  */
 static void
 configure_secondary (Box* _box)
@@ -1136,45 +1195,84 @@ prepare_tlv (struct box_txn* _tx, const struct tlv* _tlv)
 }
 
 /**
- * @brief Проверяем индексы на эквивалентность по количеству записей в них
+ * @brief Проверяем индексы на эквивалентность
+ *
+ * Случай, когда во вторичном индексе присутствует объект отсутствующий в первичном
+ * индексе, не проверяем, так как данная функция вызывается после полной переиндексации
+ * данных по первичному индексу. Так что такая проверка только зря потратит процессорное
+ * время.
  */
-static int
-verify_indexes (struct object_space* _osp, size_t _rows)
+static void
+verify_indexes (struct object_space* _osp)
 {
-	foreach_indexi (1, index, _osp)
+	title ("snap_dump/check indexes");
+
+	//
+	// Число проверенных объектов
+	//
+	size_t pk_rows = 0;
+
+	//
+	// Объект из первичного индекса
+	//
+	struct tnt_object* obj = NULL;
+
+	//
+	// Проходим по всем объектам первичного индекса
+	//
+	Index<BasicIndex>* pk = _osp->index[0];
+	[pk iterator_init];
+	while ((obj = [pk iterator_next]))
 	{
-		struct tnt_object* obj = NULL;
+		//
+		// Проверяем только рекально существующие объекты
+		//
+		obj = tuple_visible_left (obj);
+		if (!obj)
+			continue;
 
-		title ("snap_dump/check index:%i", index->conf.n);
-
-		size_t index_rows = 0;
-		[index iterator_init];
-		while ((obj = [index iterator_next]))
+		//
+		// Для каждого объекта проходим по всем вторичным индексам
+		//
+		foreach_indexi (1, index, _osp)
 		{
-			obj = tuple_visible_left (obj);
-			if (obj == NULL)
-				continue;
+			//
+			// Проверяем должен ли объект находится в индексе
+			//
+			bool m = tuple_match (&index->conf, obj);
 
-			++index_rows;
+			//
+			// Находим объект в индексе
+			//
+			struct tnt_object* index_obj = [index find_obj:obj];
 
-			if ((cfg.snap_dump_check_rows > 0) && ((index_rows % cfg.snap_dump_check_rows) == 0)) {
-                                struct timespec duration;
-                                //set cfg.snap_dump_check_sleep in milliseconds
-                                duration.tv_sec  = (cfg.snap_dump_check_sleep >= 1000) ? cfg.snap_dump_check_sleep / 1000 : 0;
-                                duration.tv_nsec = (cfg.snap_dump_check_sleep % 1000) * 1000000;
-                                nanosleep(&duration, NULL);
-                        }
+			//
+			// Если объект должен находиться в индексе, но не находится там,
+			// то это ошибка
+			//
+			if (m && !index_obj)
+				say_error ("index %i of object space %i violation found at position %zi (object not found in index)", index->conf.n, _osp->n, pk_rows);
+
+			//
+			// Если объект не должен находиться в индексе, но находится там,
+			// то это ошибка
+			//
+			if (!m && index_obj)
+				say_error ("index %i of object space %i violation found at position %zi (object found in index)", index->conf.n, _osp->n, pk_rows);
 		}
 
-		if (_rows != index_rows)
+		//
+		// Временно засыпаем через заданное количество проверенных объектов
+		//
+		if ((cfg.snap_dump_check_rows > 0) && ((++pk_rows % cfg.snap_dump_check_rows) == 0))
 		{
-			say_error ("heap invariant violation: n:%i index:%i rows:%zi != pk_rows:%zi",
-							_osp->n, index->conf.n, index_rows, _rows);
-			return -1;
+			struct timespec duration;
+			//set cfg.snap_dump_check_sleep in milliseconds
+			duration.tv_sec  = (cfg.snap_dump_check_sleep >= 1000) ? cfg.snap_dump_check_sleep/1000 : 0;
+			duration.tv_nsec = (cfg.snap_dump_check_sleep%1000)*1000000;
+			nanosleep (&duration, NULL);
 		}
 	}
-
-	return 0;
 }
 
 @implementation Box
@@ -1329,7 +1427,7 @@ apply:(struct tbuf*)_data tag:(u16)_tag
 				raise_fmt ("object_space %i is not configured", snap->object_space);
 
 			//
-			// Данные для данной таблицы игноритуются
+			// Данные при загрузке таблицы из снапшота игнорируются
 			//
 			if (osp->ignored)
 				break;
@@ -1340,8 +1438,9 @@ apply:(struct tbuf*)_data tag:(u16)_tag
 			assert (osp->index[0] != NULL);
 
 			//
-			// Добавляем запись в таблицу (данные добавляются только в первичный
-			// индекс)
+			// Добавляем объект в таблицу (данные добавляются только в первичный
+			// индекс, а после загрузки всего снапшота вызывается функция перестроения
+			// вторичных индексов сразу для всех таблиц и объектов)
 			//
 			snap_insert_row (osp, snap->tuple_size, snap->data, snap->data_size);
 			break;
@@ -1437,7 +1536,7 @@ snapshot_fold
 		//
 		id pk = object_space_registry[n]->index[0];
 		//
-		// Инициализируем итератор обхода записей таблицы в зависимости
+		// Инициализируем итератор обхода объектов таблицы в зависимости
 		// от поддержки упорядоченного обхода (для фиксации порядка обхода,
 		// чтобы вычисляемая CRC32-сумма не зависила от размещения данных
 		// в памяти)
@@ -1448,7 +1547,7 @@ snapshot_fold
 			[pk iterator_init];
 
 		//
-		// Проходим по всем записях таблицы
+		// Проходим по всем объектам таблицы
 		//
 		while ((obj = [pk iterator_next]))
 		{
@@ -1475,7 +1574,7 @@ snapshot_fold
 snapshot_estimate
 {
 	//
-	// Подсчитываем общее количество записей в базе данных
+	// Подсчитываем общее количество объектов в базе данных
 	//
 	size_t total_rows = 0;
 	for (int n = 0; n < nelem (object_space_registry); ++n)
@@ -1532,6 +1631,12 @@ snapshot_write_rows:(XLog*)_log
 			assert (n == osp->n);
 
 			//
+			// Проверяем, что все данные в таблице правильно проиндексированы,
+			// то есть таблица валидна и её данные можно записать в стапшот
+			//
+			verify_indexes (osp);
+
+			//
 			// Первичный ключ таблицы, по которому будем выполнять сканирование записей
 			//
 			Index<BasicIndex>* pk = osp->index[0];
@@ -1554,21 +1659,20 @@ snapshot_write_rows:(XLog*)_log
 			}
 
 			//
-			// Проходим по всем записям таблицы
+			// Проходим по всем объектам таблицы
 			//
-			size_t osp_pk_rows = 0;
 			[pk iterator_init];
 			while ((obj = [pk iterator_next]))
 			{
 				//
-				// Запись для вывода в журнал
+				// Объект для вывода в журнал
 				//
 				obj = tuple_visible_left (obj);
-				if (obj == NULL)
+				if (!obj)
 					continue;
 
 				//
-				// Проверяем валидность записи
+				// Проверяем валидность объекта
 				//
 				if (!tuple_valid (obj))
 				{
@@ -1596,7 +1700,7 @@ snapshot_write_rows:(XLog*)_log
 				header.data_size    = tuple_bsize (obj);
 
 				//
-				// Пишем запись в буфер, который затем выводим в лог
+				// Пишем объект в буфер, который затем выводим в лог
 				//
 				tbuf_reset  (buf);
 				tbuf_append (buf, &header, sizeof (header));
@@ -1604,11 +1708,6 @@ snapshot_write_rows:(XLog*)_log
 
 				if ([_log append_row:buf->ptr len:tbuf_len (buf) shard:shard tag:snap_data|TAG_SNAP] == NULL)
 					@throw [Error with_reason:"can't write tuple into WAL"];
-
-				//
-				// Общее количество записей в первичном ключе
-				//
-				++osp_pk_rows;
 
 				//
 				// Индикация прогресса записи данных
@@ -1628,18 +1727,12 @@ snapshot_write_rows:(XLog*)_log
 			//
 			if (!shard->dummy)
 			{
-				foreach_index (index, osp)
+				//
+				// Здесь первичный индекс не пишем, так как он был сохранён ранее
+				// как часть конфигурации таблицы
+				//
+				foreach_indexi (1, index, osp)
 				{
-					//
-					// Пропускаем первичный индекс таблицы так как он уже
-					// был сохранён ранее как часть описания таблицы
-					//
-					if (index->conf.n == 0)
-						continue;
-
-					//
-					// Пишем в буфер конфигурацию индекса
-					//
 					tbuf_reset (buf);
 					write_i32  (buf, n);
 					write_i32  (buf, 0); // flags
@@ -1650,25 +1743,6 @@ snapshot_write_rows:(XLog*)_log
 						@throw [Error with_reason:"can't write index configuration into snapshot"];
 				}
 			}
-
-			//
-			// Проверяем размеры индексов. При обнаружении расхождений ничего не делаем, а
-			// просто сообщаем о проблеме.
-			//
-			// Раньше здесь при несхождении размеров устанавливалось errno = EINVAL и выбрасывалось
-			// исключение. При объявлении уникального хэш индекса и появлении в нём дубликатов по
-			// индексируемому полю (например при загрузке из снапшота уникальность проверяется, но
-			// данные всё равно грузятся, чтобы не блокировать работу сервиса) количество записей
-			// по первичному ключу и ключу с дубликатами оказывалось различным. Это приводило к тому,
-			// что здесь выдавалось исключение, снапшот не закрывался и данные, соответственно не
-			// сохранялись. Причём из-за установки EINVAL через какое-то время сохранение снапшота
-			// повторялось и так до бесконечности.
-			//
-			// Поскольку на самом деле это не приводит к проблемам, то сейчас мы снапшот пишем, но
-			// выдаём сообщение с предложением проверить, в чём дело.
-			//
-			if (verify_indexes (osp, osp_pk_rows) < 0)
-				say_error ("mismatch indexes: check for duplicates in unique HASH indexes");
 		}
 	}
 	@catch (Error* e)
