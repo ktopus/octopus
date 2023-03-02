@@ -168,7 +168,7 @@ local function loop_inner(ushard, key, conf)
                 insert(batch, tuple)
             end
             count = count + 1
-            if count == batch_size then
+            if count == conf.batch_size then
                 newkey = indx:cur_iter()
                 break
             end
@@ -197,7 +197,7 @@ local function loop_inner(ushard, key, conf)
                 break
             end
             count = count + 1
-            if count == batch_size then
+            if count == conf.batch_size then
                 if direction ~= 'head' and direction ~= 'tail' then
                     newkey = nxt(ix)
                     if newkey ~= nil then
@@ -228,9 +228,9 @@ local function loop_inner(ushard, key, conf)
         end
     end
     if conf.encount == 'batch' then
-        return newkey, (#batch + 1) * batch_size / ((batch_size+1) * expires_per_second)
+        return newkey, (#batch + 1) * conf.batch_size / ((conf.batch_size+1) * expires_per_second)
     elseif conf.encount == 'filter' then
-        return newkey, (count + 1) * batch_size / ((batch_size+1) * expires_per_second)
+        return newkey, (count + 1) * conf.batch_size / ((conf.batch_size+1) * expires_per_second)
     else
         error("who the f@ck changed conf.encount?")
     end
