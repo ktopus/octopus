@@ -485,7 +485,13 @@ create_pid(void)
 		if (ftruncate(pid_file, 0))
 			panic_syserror("could not truncate pid file");
 	}
-	char buf[8] = { 0 };
+	/*
+	 We require at least 9 chars for that (c-string is null-terminated)
+	 As of linux-5.15.94/include/linux/threads.h, line 31-32:
+	 * A maximum of 4 million PIDs should be enough for a while.
+	 * [NOTE: PID/TIDs are limited to 2^30 ~= 1 billion, see FUTEX_TID_MASK.]
+	*/
+	char buf[9] = { 0 };
 	int n = snprintf(buf, sizeof(buf)-1, "%d\n", master_pid);
 	errno = 0;
 	if (write(pid_file, buf, n) != n) {
