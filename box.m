@@ -67,6 +67,23 @@ static struct iproto_service box_secondary;
 #define foreach_op(...) for (int* op = (int[]){__VA_ARGS__, 0}; *op; ++op)
 
 /**
+ * @brief Вывести в лог заданный список модификаций
+ */
+#define TRACE_PHI_CELLS(_phi) \
+{ \
+	if (will_say (INFO)) \
+	{ \
+		struct box_phi_cell* xxx_cell; \
+		TAILQ_FOREACH (xxx_cell, &(_phi)->cells, phi_link) \
+		{ \
+				say_info ("%s[phi cells]: idx:%d phi:%p cell:%p obj:%p", __func__, \
+						  xxx_cell->phi->index->conf.n, xxx_cell->phi, xxx_cell, \
+						  xxx_cell->obj); \
+		} \
+	} \
+}
+
+/**
  * @brief Инициализация обработчиков запросов
  */
 static void
@@ -1665,11 +1682,42 @@ snapshot_write_rows:(XLog*)_log
 			while ((obj = [pk iterator_next]))
 			{
 				//
-				// Объект для вывода в журнал
+				// Запоминаем исходный объект из индекса для вывода диагностики
+				//
+				struct tnt_object* origin = obj;
+				//
+				// Запись для вывода в журнал берём последнюю подверждённую
 				//
 				obj = tuple_visible_left (obj);
 				if (!obj)
 					continue;
+
+				//
+				// Проверяем тип объекта
+				//
+				switch (obj->type)
+				{
+					case BOX_SMALL_TUPLE:
+					case BOX_TUPLE:
+						break;
+
+					case BOX_PHI:
+						say_error ("%s: heap invariant violation: n:%i tuple %p "
+								   "is a PHI (PHI recursion found in %p)", __func__,
+								   n, obj, origin);
+						if (origin->type == BOX_PHI)
+							TRACE_PHI_CELLS (box_phi (origin));
+						TRACE_PHI_CELLS (box_phi (obj));
+						return 0;
+
+					default:
+						say_error ("%s: heap invariant violation: n:%i tuple %p "
+								   "with wrong type %i found in %p", __func__,
+								   n, obj, obj->type, origin);
+						if (origin->type == BOX_PHI)
+							TRACE_PHI_CELLS (box_phi (origin));
+						return 0;
+				}
 
 				//
 				// Проверяем валидность объекта
