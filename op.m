@@ -219,6 +219,12 @@ phi_commit (struct box_phi_cell* _cell)
 		assert ((_cell->obj != NULL) || (TAILQ_NEXT (_cell, phi_link)->obj != NULL));
 
 		//
+		// FIXME: только для отладки, перед мержем в mod_box удалить
+		//
+		say_info ("%s: replace version %p with version %p in %p chain", __func__,
+				  phi->obj, _cell->obj, phi);
+
+		//
 		// Фиксируем версию объекта как текущую актуальную для всей транзакции
 		// для данного индекса
 		//
