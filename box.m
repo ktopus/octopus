@@ -61,11 +61,6 @@
 #include <sysexits.h>
 #include <time.h>
 
-static struct iproto_service box_primary;
-static struct iproto_service box_secondary;
-
-#define foreach_op(...) for (int* op = (int[]){__VA_ARGS__, 0}; *op; ++op)
-
 /**
  * @brief Вывести в лог заданный список модификаций
  */
@@ -82,6 +77,11 @@ static struct iproto_service box_secondary;
 		} \
 	} \
 }
+
+static struct iproto_service box_primary;
+static struct iproto_service box_secondary;
+
+#define foreach_op(...) for (int* op = (int[]){__VA_ARGS__, 0}; *op; ++op)
 
 /**
  * @brief Инициализация обработчиков запросов
